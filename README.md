@@ -2,7 +2,7 @@
 
 Soroban contract starter for EarnProof.
 
-## Phase 0 Included
+## Included Setup
 
 - Rust workspace
 - Shared on-chain types
@@ -23,7 +23,7 @@ latest SDK test utility dependency is not compiling cleanly against this local
 Rust toolchain. Contract unit tests should be added once the SDK/toolchain pair
 is pinned for the project.
 
-## Protocol Config Phase 1
+## Protocol Config Progress
 
 Implemented functions:
 

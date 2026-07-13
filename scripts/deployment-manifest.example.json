@@ -1,0 +1,11 @@
+{
+  "network": "stellar-testnet",
+  "deployedAt": "2026-07-13T00:00:00Z",
+  "contracts": {
+    "protocolConfig": "CDXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "issuerRegistry": "CDXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "proofRegistry": "CDXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  },
+  "schemaVersions": [1],
+  "notes": "Copy this file after deployment and replace placeholder contract IDs."
+}

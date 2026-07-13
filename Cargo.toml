@@ -1,0 +1,17 @@
+[workspace]
+members = [
+  "contracts/protocol-config",
+  "contracts/issuer-registry",
+  "contracts/proof-registry",
+  "packages/shared"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/veridatum-labs/earnproof-contracts"
+
+[workspace.dependencies]
+soroban-sdk = "27.0.0"
+earnproof-shared = { path = "packages/shared" }

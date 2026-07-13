@@ -6,7 +6,7 @@ Soroban contract starter for EarnProof.
 
 - Rust workspace
 - Shared on-chain types
-- `protocol-config` contract shell
+- `protocol-config` contract with admin, pause, schema version, and config version state
 - `issuer-registry` contract shell
 - `proof-registry` contract shell
 - Contract crates that compile against `soroban-sdk`
@@ -22,6 +22,21 @@ The current starter intentionally avoids `soroban-sdk/testutils` because the
 latest SDK test utility dependency is not compiling cleanly against this local
 Rust toolchain. Contract unit tests should be added once the SDK/toolchain pair
 is pinned for the project.
+
+## Protocol Config Phase 1
+
+Implemented functions:
+
+- `initialize`
+- `get_admin`
+- `set_admin`
+- `pause`
+- `unpause`
+- `is_paused`
+- `approve_schema_version`
+- `deprecate_schema_version`
+- `is_schema_version_approved`
+- `get_config_version`
 
 ## Privacy Boundary
 

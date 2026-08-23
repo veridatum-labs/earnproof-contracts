@@ -137,6 +137,8 @@ Contracts may store:
 - Sensitive operations should respect protocol pause state.
 - Mainnet deployment should wait for independent review.
 
+See [docs/threat-model.md](docs/threat-model.md) for the full threat model, security review checklist, and mainnet release gates.
+
 ## Related Repositories
 
 - `earnproof-frontend`: Public app, worker dashboard, issuer UI, verifier UI, and admin UI.

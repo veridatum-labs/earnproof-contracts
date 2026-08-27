@@ -11,6 +11,7 @@ are indistinguishable until something fails in production.
 - Release notes: [`docs/releases/`](releases/)
 - Event fixtures: [`tests/fixtures/events/`](../tests/fixtures/events/)
 - Deployment manifests: [`scripts/`](../scripts/)
+- Golden tests: [`tests/compatibility/`](../tests/compatibility/)
 
 ## Change classes
 
@@ -229,3 +230,84 @@ wrong that surfaces as a production outage rather than a failed build.
   `pwsh -File scripts/verify-manifest.ps1 -Manifest <manifest> -Release <note>`.
 - Changing the required fields: update the template, the validation, and
   `scripts/verify-manifest.tests.ps1` together — the tests assert the field set.
+
+
+## Golden Tests
+
+Contract ABI, storage, errors, and events are captured as golden artifacts in
+[`tests/compatibility/`](../tests/compatibility/). These golden snapshots serve
+as a machine-readable specification of the stable interface and are compared
+against the current implementation to detect breaking changes automatically.
+
+### How it works
+
+1. **Artifacts are captured**: Public functions, storage keys, error codes, and
+   event types are listed for each contract in `tests/compatibility/src/artifacts.rs`.
+
+2. **Gates classify changes**: The compatibility gates in
+   `tests/compatibility/src/gates.rs` compare the golden artifacts against the
+   current state and classify each change:
+   - **Breaking**: Function removed, key removed, error code changed, event removed
+   - **Additive**: New function, new key, new error code, new event
+   - **Semantic**: New error condition, changed behavior without ABI change
+   - **Unchanged**: No change
+
+3. **Tests fail on breaking changes**: The test suite in
+   `tests/compatibility/src/lib.rs` runs the gates on each contract and asserts
+   that no breaking changes are present.
+
+4. **Negative fixtures prove the gates work**: `tests/compatibility/src/negative_fixtures.rs`
+   contains synthetic breaking changes that deliberately fail the gates, serving
+   as proof that the gates catch real problems.
+
+### Running the tests
+
+```bash
+cargo test -p compatibility-tests
+```
+
+The test suite runs on every CI build. A breaking change causes the build to fail
+with a report showing which contract changed, what was added/removed/changed, and
+the classification.
+
+### Updating the golden artifacts
+
+When an intentional breaking change is approved (with governance sign-off per the
+requirements above), update the golden artifacts:
+
+1. In `tests/compatibility/src/artifacts.rs`, update the contract's `abi()`,
+   `storage_keys()`, `error_codes()`, or `events()` function to include or remove
+   the changed items.
+
+2. Re-run `cargo test -p compatibility-tests` to confirm the gates pass.
+
+3. Include the artifact changes in the PR with a clear explanation of which change
+   was approved and why.
+
+### Storage encoding snapshots
+
+**Status**: Captured at the type level. The contracts use `#[contracttype]` derive
+macros to generate deterministic Soroban XDR encodings. The golden tests verify
+that all storage key types are present and accounted for.
+
+Future work ([#18](https://github.com/veridatum-labs/earnproof-contracts/issues/18))
+will encode representative storage values as XDR hex blobs and assert that encoding
+is stable across toolchain updates.
+
+### Event compatibility
+
+Event fixtures are documented in [`tests/fixtures/events/`](../tests/fixtures/events/)
+and tested separately in the [`tests/events/`](../tests/events/) crate.
+
+The compatibility gates verify that:
+- No events are removed
+- No event topics or fields are renamed
+- New events and new fields are tracked
+
+### Why golden tests matter
+
+Without golden tests, a breaking change can slip through review and land in a
+release. Downstream consumers only discover it when their anchor daemon fails
+in production. The golden tests make breaking changes visible at code review
+and CI time, not in production logs.
+

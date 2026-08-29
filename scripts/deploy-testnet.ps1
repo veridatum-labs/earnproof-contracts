@@ -22,8 +22,15 @@ function Assert-Command($Name) {
 }
 
 function Test-RetryableStellarError($Output) {
-  $text = ($Output -join "`n")
+  $text = ($Output | ForEach-Object { Format-CapturedLine $_ }) -join "`n"
   return $text -match "SendRequest|Connect|connection|timeout|timed out|temporarily unavailable|TxBadSeq"
+}
+
+function Format-CapturedLine($Item) {
+  if ($Item -is [System.Management.Automation.ErrorRecord]) {
+    return $Item.Exception.Message
+  }
+  return "$Item"
 }
 
 function Invoke-WithRetry($Description, $Command, [switch]$CaptureOutput) {
@@ -36,21 +43,27 @@ function Invoke-WithRetry($Description, $Command, [switch]$CaptureOutput) {
       Write-Host "    retry $attempt of $MaxRetries"
     }
 
-    $output = & $Command[0] @($Command | Select-Object -Skip 1) 2>&1
-    $exitCode = $LASTEXITCODE
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      $output = & $Command[0] @($Command | Select-Object -Skip 1) 2>&1
+      $exitCode = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $previousEap
+    }
 
     if ($exitCode -eq 0) {
       if ($CaptureOutput) {
         return $output
       }
       if ($output) {
-        $output | ForEach-Object { Write-Host $_ }
+        $output | ForEach-Object { Write-Host (Format-CapturedLine $_) }
       }
       return
     }
 
     if ($output) {
-      $output | ForEach-Object { Write-Warning $_ }
+      $output | ForEach-Object { Write-Warning (Format-CapturedLine $_) }
     }
 
     if (($attempt -ge $MaxRetries) -or -not (Test-RetryableStellarError $output)) {
@@ -99,6 +112,18 @@ function Get-Sha256Text($Value) {
   }
 }
 
+function Test-Provenance {
+  $provenancePath = Join-Path $root "artifacts/provenance.json"
+  if (-not (Test-Path $provenancePath)) {
+    Write-Warning "No provenance manifest found at artifacts/provenance.json. Skipping provenance verification."
+    return
+  }
+
+  Write-Host "==> Verify WASM provenance"
+  $verifyScript = Join-Path $PSScriptRoot "verify-provenance.ps1"
+  & $verifyScript -Provenance $provenancePath
+}
+
 Assert-Command "cargo"
 Assert-Command "rustup"
 Assert-Command "stellar"
@@ -109,6 +134,8 @@ Push-Location $root
 try {
   Invoke-Step "Install Stellar WASM target" @("rustup", "target", "add", "wasm32v1-none")
   Invoke-Step "Build contract WASM artifacts" @("stellar", "contract", "build")
+
+  Test-Provenance
 
   $wasmRoot = Join-Path $root "target/wasm32v1-none/release"
   $protocolWasm = Join-Path $wasmRoot "protocol_config.wasm"

@@ -488,8 +488,9 @@ fn a_failed_registration_rolls_back_writes_inside_the_dependency() {
         (recording, env.register(RejectsIssuerRead, ()))
     });
 
-    let recording = RecordingConfigClient::new(&deployment.env, &deployment.proofs.get_protocol_config());
-    
+    let recording =
+        RecordingConfigClient::new(&deployment.env, &deployment.proofs.get_protocol_config());
+
     // Before registration, the recording config has not been touched
     let before = recording.was_touched();
     assert!(!before, "the recording config should start untouched");
@@ -500,7 +501,10 @@ fn a_failed_registration_rolls_back_writes_inside_the_dependency() {
 
     // After the failed registration, the write should be rolled back
     let after = recording.was_touched();
-    assert!(!after, "the write inside the dependency must be rolled back on registration failure");
+    assert!(
+        !after,
+        "the write inside the dependency must be rolled back on registration failure"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +532,7 @@ fn an_invalid_protocol_config_address_aborts_the_registration() {
 
     let proofs_id = env.register(proof_registry::ProofRegistryContract, ());
     let proofs = proof_registry::ProofRegistryContractClient::new(&env, &proofs_id);
-    
+
     // Initialize with an invalid config address
     let invalid_config = Address::generate(&env);
     proofs.initialize(&admin, &issuers_id, &invalid_config);
@@ -570,7 +574,7 @@ fn an_invalid_issuer_registry_address_aborts_the_registration() {
 
     let proofs_id = env.register(proof_registry::ProofRegistryContract, ());
     let proofs = proof_registry::ProofRegistryContractClient::new(&env, &proofs_id);
-    
+
     // Initialize with an invalid issuer registry address
     let invalid_issuers = Address::generate(&env);
     proofs.initialize(&admin, &invalid_issuers, &config_id);

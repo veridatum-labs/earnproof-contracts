@@ -12,7 +12,7 @@ doctest = false
 
 [dependencies]
 earnproof-shared.workspace = true
-soroban-sdk.workspace = true
+soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [dev-dependencies]
 issuer-registry = { path = "../../contracts/issuer-registry" }

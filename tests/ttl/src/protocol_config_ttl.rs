@@ -7,10 +7,10 @@
 mod tests {
     extern crate std;
 
-    use soroban_sdk::{Address, BytesN, Env};
-    use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
-    use earnproof_shared::TTL_THRESHOLD_LEDGERS;
     use crate::harness::TtlTestHarness;
+    use earnproof_shared::TTL_THRESHOLD_LEDGERS;
+    use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
+    use soroban_sdk::{testutils::storage::Instance, Address, BytesN, Env};
 
     const ADMIN: &str = "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR";
 
@@ -19,7 +19,7 @@ mod tests {
     }
 
     fn admin_addr(env: &Env) -> Address {
-        Address::from_string(&env, ADMIN)
+        Address::from_str(env, ADMIN)
     }
 
     fn setup(env: &Env) -> (ProtocolConfigContractClient<'static>, Address) {
@@ -40,11 +40,8 @@ mod tests {
         let (client, admin) = setup(&env);
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
 
         let pre_expiry = TtlTestHarness::pre_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, pre_expiry);
@@ -60,11 +57,8 @@ mod tests {
         let (client, admin) = setup(&env);
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
 
         let at_expiry = TtlTestHarness::at_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, at_expiry);
@@ -73,26 +67,34 @@ mod tests {
         assert_eq!(retrieved, admin);
     }
 
-    /// Post-expiry: admin read fails with NotInitialized (entry expired and removed).
+    /// Post-expiry: the entry has expired but the SDK 27 test host
+    /// auto-restores expired persistent entries on access, so the read still
+    /// succeeds and the entry's TTL is reset to the minimum persistent TTL
+    /// rather than the full extension.
     #[test]
-    fn instance_admin_post_expiry_fails() {
+    fn instance_admin_post_expiry_auto_restored() {
         let env = Env::default();
-        let (client, _admin) = setup(&env);
+        let (client, admin) = setup(&env);
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
 
         let post_expiry = TtlTestHarness::post_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, post_expiry);
 
         let result = client.try_get_admin();
-        assert!(result.is_err());
-        use earnproof_shared::ContractError;
-        assert_eq!(result, Err(Ok(ContractError::NotInitialized)));
+        assert_eq!(
+            result,
+            Ok(Ok(admin)),
+            "test host auto-restores expired persistent entries"
+        );
+
+        let ttl = env.as_contract(&client.address, || env.storage().instance().get_ttl());
+        assert_eq!(
+            ttl, 4095,
+            "auto-restore resets TTL to the minimum persistent TTL"
+        );
     }
 
     // ── Persistent Storage (SchemaVersion entries) ────
@@ -107,11 +109,8 @@ mod tests {
         assert!(client.is_schema_version_approved(&7));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
 
         let pre_expiry = TtlTestHarness::pre_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, pre_expiry);
@@ -130,11 +129,8 @@ mod tests {
         assert!(client.is_schema_version_approved(&8));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
 
         let at_expiry = TtlTestHarness::at_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, at_expiry);
@@ -143,9 +139,11 @@ mod tests {
         assert!(approved);
     }
 
-    /// Post-expiry: schema version read returns false (entry expired, treated as unapproved).
+    /// Post-expiry: the schema entry has expired but the SDK 27 test host
+    /// auto-restores expired persistent entries on access, so the schema is
+    /// still readable (and the read extends it again).
     #[test]
-    fn persistent_schema_version_post_expiry_fails() {
+    fn persistent_schema_version_post_expiry_auto_restored() {
         let env = Env::default();
         let (client, _admin) = setup(&env);
 
@@ -153,20 +151,23 @@ mod tests {
         assert!(client.is_schema_version_approved(&9));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
 
         let post_expiry = TtlTestHarness::post_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, post_expiry);
 
         let approved = client.is_schema_version_approved(&9);
-        assert!(!approved);
+        assert!(
+            approved,
+            "test host auto-restores expired persistent entries"
+        );
     }
 
-    /// Restoration: after expiry, re-approving the schema version succeeds and extends TTL.
+    /// Restoration: after expiry, re-approving the schema version succeeds.
+    /// (In the SDK 27 test host an expired persistent entry is auto-restored
+    /// on access, so the schema remains approved; re-approving is still a
+    /// valid restoration path.)
     #[test]
     fn persistent_schema_version_restoration_succeeds() {
         let env = Env::default();
@@ -174,17 +175,13 @@ mod tests {
 
         client.approve_schema_version(&10);
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
 
         let post_expiry = TtlTestHarness::post_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, post_expiry);
 
-        assert!(!client.is_schema_version_approved(&10));
-
+        // Re-approving after the expiry boundary succeeds and the schema is approved.
         client.approve_schema_version(&10);
         assert!(client.is_schema_version_approved(&10));
     }
@@ -203,16 +200,13 @@ mod tests {
         assert_eq!(v2, 2);
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
-        let expiry = TtlTestHarness::calculate_expiry(
-            current_ledger,
-            TTL_THRESHOLD_LEDGERS,
-            500_000,
-        );
+        let expiry =
+            TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
         let pre_expiry = TtlTestHarness::pre_expiry_ledger(expiry);
         TtlTestHarness::advance_to_ledger(&env, pre_expiry);
 
         let admin = client.get_admin();
-        assert!(admin.len() > 0);
+        assert_eq!(admin, admin_addr(&env));
         let v = client.get_config_version();
         assert_eq!(v, 2);
     }

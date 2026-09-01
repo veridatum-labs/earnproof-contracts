@@ -231,7 +231,6 @@ impl ProofRegistryContract {
     /// `new_version` must be strictly greater than the current contract
     /// version to prevent pre-approving a downgrade.
     pub fn approve_upgrade(env: Env, wasm_hash: BytesN<32>, new_version: u32) {
-
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -255,7 +254,6 @@ impl ProofRegistryContract {
 
     /// Admin-only: remove a hash from the allowlist without applying it.
     pub fn revoke_upgrade(env: Env, wasm_hash: BytesN<32>) {
-
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -287,7 +285,6 @@ impl ProofRegistryContract {
     /// On success the allowlist entry is consumed and `ContractVersion` is
     /// advanced.
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
-
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -326,7 +323,6 @@ impl ProofRegistryContract {
     }
 
     // ── private helpers ───────────────────────────────────────────────────────
-
 
     fn validate_dependency_addresses(
         env: &Env,
@@ -410,7 +406,7 @@ mod test {
     extern crate std;
 
     use super::{DataKey, ProofRegistryContract, ProofRegistryContractClient};
-    use earnproof_shared::{ProofStatus, TTL_THRESHOLD_LEDGERS};
+    use earnproof_shared::{ProofError, ProofStatus, TTL_THRESHOLD_LEDGERS};
     use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};
     use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
     use soroban_sdk::{testutils::storage::Persistent as _, Address, BytesN, Env};
@@ -724,29 +720,16 @@ mod test {
         let issuer = Address::from_str(&env, ISSUER);
 
         // Valid: minimum allowed schema version
-        client.register_proof(
-            &bytes(&env, 1),
-            &bytes(&env, 2),
-            &issuer,
-            &1,
-            &2_000,
-        );
+        client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
         assert!(client.is_valid_proof(&bytes(&env, 1)));
 
         // Valid: typical schema version
-        let pc = _pc.clone();
-        pc.approve_schema_version(&99);
-        client.register_proof(
-            &bytes(&env, 10),
-            &bytes(&env, 11),
-            &issuer,
-            &99,
-            &2_000,
-        );
+        _pc.approve_schema_version(&99);
+        client.register_proof(&bytes(&env, 10), &bytes(&env, 11), &issuer, &99, &2_000);
         assert!(client.is_valid_proof(&bytes(&env, 10)));
 
         // Valid: large schema version
-        pc.approve_schema_version(&u32::MAX);
+        _pc.approve_schema_version(&u32::MAX);
         client.register_proof(
             &bytes(&env, 20),
             &bytes(&env, 21),
@@ -758,13 +741,14 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "schema version must be")]
     fn register_proof_schema_version_zero_rejected() {
         let (env, client, _pc, _ir, _ir_id) = setup();
         let issuer = Address::from_str(&env, ISSUER);
 
-        // Schema version 0 must be rejected
-        client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &0, &2_000);
+        // Schema version 0 must be rejected with a typed error.
+        let result =
+            client.try_register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &0, &2_000);
+        assert_eq!(result, Err(Ok(ProofError::InvalidSchemaVersion)));
     }
 
     /// Table-driven tests for proof expiration boundaries.
@@ -796,49 +780,38 @@ mod test {
         assert!(client.is_valid_proof(&bytes(&env, 10)));
 
         // Valid: far future (max u64 is reachable in practice)
-        client.register_proof(
-            &bytes(&env, 20),
-            &bytes(&env, 21),
-            &issuer,
-            &1,
-            &u64::MAX,
-        );
+        client.register_proof(&bytes(&env, 20), &bytes(&env, 21), &issuer, &1, &u64::MAX);
         assert!(client.is_valid_proof(&bytes(&env, 20)));
     }
 
     #[test]
-    #[should_panic(expected = "proof expiration must be in the future")]
     fn register_proof_expiration_at_current_time_rejected() {
         let (env, client, _pc, _ir, _ir_id) = setup();
         let issuer = Address::from_str(&env, ISSUER);
         let current_time = env.ledger().timestamp();
 
-        // Expiration equal to current time is rejected
-        client.register_proof(
-            &bytes(&env, 1),
-            &bytes(&env, 2),
-            &issuer,
-            &1,
-            &current_time,
-        );
+        // Expiration equal to current time is rejected with a typed error.
+        let result =
+            client.try_register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &current_time);
+        assert_eq!(result, Err(Ok(ProofError::ProofExpired)));
     }
 
     #[test]
-    #[should_panic(expected = "proof expiration must be in the future")]
     fn register_proof_expiration_in_past_rejected() {
         let (env, client, _pc, _ir, _ir_id) = setup();
         let issuer = Address::from_str(&env, ISSUER);
         let current_time = env.ledger().timestamp();
 
-        // Expiration in the past is rejected
+        // Expiration in the past is rejected with a typed error.
         if current_time > 0 {
-            client.register_proof(
+            let result = client.try_register_proof(
                 &bytes(&env, 1),
                 &bytes(&env, 2),
                 &issuer,
                 &1,
                 &(current_time - 1),
             );
+            assert_eq!(result, Err(Ok(ProofError::ProofExpired)));
         }
     }
 
@@ -850,21 +823,19 @@ mod test {
         let issuer = Address::from_str(&env, ISSUER);
 
         // Check that no proofs exist initially
-        let proof_id = bytes(&env, 999);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            env.storage().persistent().get::<_, _>(&DataKey::Proof(proof_id.clone()))
-        }));
-        // Initial state: proof should not exist (or be None/empty)
+        let proof_id = bytes(&env, 99);
+        env.as_contract(&client.address, || {
+            assert!(
+                !env.storage()
+                    .persistent()
+                    .has(&DataKey::Proof(proof_id.clone())),
+                "initial state must not contain the proof"
+            );
+        });
 
         // Attempt to register with schema version 0 — should panic
         let register_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.register_proof(
-                &proof_id,
-                &bytes(&env, 888),
-                &issuer,
-                &0,
-                &2_000,
-            );
+            client.register_proof(&proof_id, &bytes(&env, 88), &issuer, &0, &2_000);
         }));
 
         // Must have panicked
@@ -873,7 +844,9 @@ mod test {
         // State must be unchanged: proof must not exist in storage
         env.as_contract(&client.address, || {
             assert!(
-                !env.storage().persistent().has(&DataKey::Proof(proof_id.clone())),
+                !env.storage()
+                    .persistent()
+                    .has(&DataKey::Proof(proof_id.clone())),
                 "failed proof registration must not write to storage"
             );
         });
@@ -884,13 +857,13 @@ mod test {
         let (env, client, _pc, _ir, _ir_id) = setup();
         let issuer = Address::from_str(&env, ISSUER);
         let current_time = env.ledger().timestamp();
-        let proof_id = bytes(&env, 777);
+        let proof_id = bytes(&env, 77);
 
         // Attempt to register with expired timestamp — should panic
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.register_proof(
                 &proof_id,
-                &bytes(&env, 666),
+                &bytes(&env, 66),
                 &issuer,
                 &1,
                 &current_time, // Equal to current time, must be rejected
@@ -1016,10 +989,7 @@ mod test {
         }));
 
         // Must have panicked with "already initialized"
-        assert!(
-            result.is_err(),
-            "re-initialization must panic"
-        );
+        assert!(result.is_err(), "re-initialization must panic");
 
         // Verify state is byte-for-byte identical
         assert_eq!(
@@ -1060,7 +1030,10 @@ mod test {
         }));
 
         // Must have panicked
-        assert!(result.is_err(), "re-initialization with different deps must panic");
+        assert!(
+            result.is_err(),
+            "re-initialization with different deps must panic"
+        );
 
         // Original dependency addresses must be preserved
         assert_eq!(
@@ -1104,7 +1077,10 @@ mod test {
         }));
 
         // Must have panicked
-        assert!(result.is_err(), "re-initialization by different admin must panic");
+        assert!(
+            result.is_err(),
+            "re-initialization by different admin must panic"
+        );
 
         // Original admin must be preserved
         assert_eq!(
@@ -1303,13 +1279,7 @@ mod test {
 
         // Verify the full system is functional: proof registration works
         let proof_id_hash = bytes(&env, 1);
-        proof_client.register_proof(
-            &proof_id_hash,
-            &bytes(&env, 2),
-            &issuer,
-            &1,
-            &2_000,
-        );
+        proof_client.register_proof(&proof_id_hash, &bytes(&env, 2), &issuer, &1, &2_000);
         assert!(proof_client.is_valid_proof(&proof_id_hash));
     }
 
@@ -1342,13 +1312,7 @@ mod test {
         // However, attempting to use the proof registry should fail because
         // the dependencies are not initialized
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            proof_client.register_proof(
-                &bytes(&env, 1),
-                &bytes(&env, 2),
-                &issuer,
-                &1,
-                &2_000,
-            );
+            proof_client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
         }));
 
         // Must have panicked (dependencies are not initialized)
@@ -1395,13 +1359,7 @@ mod test {
         // Initialization succeeds, but proof registration must fail at runtime
         // because the dependencies are the wrong contracts
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            proof_client.register_proof(
-                &bytes(&env, 1),
-                &bytes(&env, 2),
-                &issuer,
-                &1,
-                &2_000,
-            );
+            proof_client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
         }));
 
         // Must have panicked
@@ -1447,13 +1405,7 @@ mod test {
 
         // Now proof registration should work because dependencies are initialized
         let proof_id_hash = bytes(&env, 1);
-        proof_client.register_proof(
-            &proof_id_hash,
-            &bytes(&env, 2),
-            &issuer,
-            &1,
-            &2_000,
-        );
+        proof_client.register_proof(&proof_id_hash, &bytes(&env, 2), &issuer, &1, &2_000);
         assert!(proof_client.is_valid_proof(&proof_id_hash));
     }
 
@@ -1487,42 +1439,30 @@ mod test {
         // Proof registration should fail because:
         // 1. Schema version 1 is not approved
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            proof_client.register_proof(
-                &bytes(&env, 1),
-                &bytes(&env, 2),
-                &issuer,
-                &1,
-                &2_000,
-            );
+            proof_client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
         }));
-        assert!(result.is_err(), "proof registration must fail without approved schema version");
+        assert!(
+            result.is_err(),
+            "proof registration must fail without approved schema version"
+        );
 
         // Now approve schema version but still no issuer registered
         pc_client.approve_schema_version(&1);
 
         // Proof registration should fail because issuer is not registered
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            proof_client.register_proof(
-                &bytes(&env, 2),
-                &bytes(&env, 3),
-                &issuer,
-                &1,
-                &2_000,
-            );
+            proof_client.register_proof(&bytes(&env, 2), &bytes(&env, 3), &issuer, &1, &2_000);
         }));
-        assert!(result.is_err(), "proof registration must fail with unregistered issuer");
+        assert!(
+            result.is_err(),
+            "proof registration must fail with unregistered issuer"
+        );
 
         // Now register the issuer and everything should work
         let issuer_id = bytes(&env, 9);
         ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
 
-        proof_client.register_proof(
-            &bytes(&env, 3),
-            &bytes(&env, 4),
-            &issuer,
-            &1,
-            &2_000,
-        );
+        proof_client.register_proof(&bytes(&env, 3), &bytes(&env, 4), &issuer, &1, &2_000);
         assert!(proof_client.is_valid_proof(&bytes(&env, 3)));
     }
 
@@ -1567,7 +1507,10 @@ mod test {
         assert_eq!(proof_client.get_admin(), admin);
 
         // Verify all re-initialization guards are in place
-        let other_admin = Address::from_str(&env, "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN");
+        let other_admin = Address::from_str(
+            &env,
+            "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
+        );
         assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             pc_client.initialize(&other_admin)
         }))
@@ -1582,17 +1525,14 @@ mod test {
         .is_err());
 
         // Verify core operations work as expected
-        proof_client.register_proof(
-            &proof_id_hash,
-            &bytes(&env, 2),
-            &issuer,
-            &1,
-            &2_000,
-        );
+        proof_client.register_proof(&proof_id_hash, &bytes(&env, 2), &issuer, &1, &2_000);
         assert!(proof_client.is_valid_proof(&proof_id_hash));
 
         // Verify state mutations work
-        let new_issuer = Address::from_str(&env, "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN");
+        let new_issuer = Address::from_str(
+            &env,
+            "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
+        );
         let new_issuer_id = bytes(&env, 99);
         ir_client.register_issuer(&new_issuer_id, &new_issuer, &bytes(&env, 88));
         assert!(ir_client.is_active_issuer(&new_issuer_id));

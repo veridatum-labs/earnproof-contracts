@@ -1,6 +1,6 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
 use earnproof_shared::ProofStatus;
+use libfuzzer_sys::fuzz_target;
 
 // Fuzz target for ProofStatus enum deserialization
 // Tests that arbitrary discriminants are handled correctly:
@@ -24,7 +24,7 @@ fuzz_target!(|data: &[u8]| {
         // Verify we can clone and compare
         let cloned = s.clone();
         assert_eq!(s, cloned);
-        
+
         // Verify enum variant matching
         match s {
             ProofStatus::Active => {

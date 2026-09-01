@@ -13,6 +13,7 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [lib]
 path = "src/lib.rs"

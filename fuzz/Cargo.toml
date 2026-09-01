@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1.3", features = ["derive"] }
-soroban-sdk.workspace = true
+soroban-sdk = { workspace = true, features = ["testutils"] }
 earnproof-shared.workspace = true
 
 [dev-dependencies]

@@ -1,5 +1,7 @@
 #![no_std]
 
+extern crate alloc;
+
 use soroban_sdk::{contracterror, contracttype, Address, BytesN};
 
 pub mod storage_namespaces;
@@ -180,6 +182,7 @@ pub mod test_utils {
     use std::vec;
     use std::vec::Vec;
     use super::*;
+    use alloc::{vec, vec::Vec};
 
     /// Represents the expected state after successful initialization.
     /// Used to verify that first initialization produces exactly the documented
@@ -237,10 +240,7 @@ pub mod test_utils {
 
     impl ContractInitSpec {
         /// Helper to create a spec for a standalone contract with a re-initialization guard.
-        pub fn standalone_with_guard(
-            name: &'static str,
-            emits_event: bool,
-        ) -> Self {
+        pub fn standalone_with_guard(name: &'static str, emits_event: bool) -> Self {
             ContractInitSpec {
                 contract_name: name,
                 has_reinit_guard: true,

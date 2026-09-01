@@ -16,8 +16,7 @@
 /// - at_expiry: ledger = expiry (entry still valid, at the boundary)
 /// - post_expiry: ledger = expiry + 1 (entry expired)
 /// - restoration: use env.storage().persistent().restore() to restore expired footprint
-
-use soroban_sdk::{Env, LedgerInfo};
+use soroban_sdk::{testutils::Ledger as _, testutils::LedgerInfo, Env};
 
 pub struct TtlTestHarness;
 
@@ -26,12 +25,14 @@ impl TtlTestHarness {
     /// Returns the new sequence number.
     pub fn advance_to_ledger(env: &Env, sequence: u32) -> u32 {
         env.ledger().set(LedgerInfo {
+            protocol_version: 27,
             sequence_number: sequence,
             timestamp: (sequence as u64) * 5, // Assume 5-second blocks
             network_id: Default::default(),
             base_reserve: 5000,
-            base_fee: 100,
-            max_tx_size: 100000,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 4096,
+            max_entry_ttl: 6_312_000,
         });
         sequence
     }
@@ -58,11 +59,7 @@ impl TtlTestHarness {
     ///
     /// For a fresh entry with no prior TTL, assume current_ttl = 0:
     ///   expiry = current_ledger + extend_to
-    pub fn calculate_expiry(
-        current_ledger: u32,
-        threshold: u32,
-        extend_to: u32,
-    ) -> u32 {
+    pub fn calculate_expiry(current_ledger: u32, _threshold: u32, extend_to: u32) -> u32 {
         current_ledger + extend_to
     }
 
@@ -107,14 +104,8 @@ mod tests {
         let expiry = TtlTestHarness::calculate_expiry(current, threshold, extend_to);
         assert_eq!(expiry, current + extend_to);
 
-        assert_eq!(
-            TtlTestHarness::pre_expiry_ledger(expiry),
-            expiry - 1
-        );
+        assert_eq!(TtlTestHarness::pre_expiry_ledger(expiry), expiry - 1);
         assert_eq!(TtlTestHarness::at_expiry_ledger(expiry), expiry);
-        assert_eq!(
-            TtlTestHarness::post_expiry_ledger(expiry),
-            expiry + 1
-        );
+        assert_eq!(TtlTestHarness::post_expiry_ledger(expiry), expiry + 1);
     }
 }

@@ -1,7 +1,7 @@
 #![no_main]
+use earnproof_shared::{is_valid_principal_address, is_zero_or_sentinel_address};
 use libfuzzer_sys::fuzz_target;
 use soroban_sdk::Env;
-use earnproof_shared::{is_valid_principal_address, is_zero_or_sentinel_address};
 
 // Fuzz target for address validation functions
 // Tests that arbitrary Address inputs are validated correctly:
@@ -22,13 +22,17 @@ fuzz_target!(|data: &[u8]| {
 
     // Test validation of arbitrary strings
     // These functions should not panic, only return true/false
-    let is_valid_principal = if let Ok(addr_str) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        // We can't directly call is_valid_principal_address here because it takes an Address
-        // But we can test the logic by checking string properties
-        lossy_str.len() == 56 && !lossy_str.is_empty() && 
-            !lossy_str.chars().all(|c| c == 'A') &&
-            lossy_str.chars().all(|c| matches!(c, 'A'..='Z' | '2'..='7'))
-    })) {
+    let is_valid_principal = if let Ok(addr_str) =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // We can't directly call is_valid_principal_address here because it takes an Address
+            // But we can test the logic by checking string properties
+            lossy_str.len() == 56
+                && !lossy_str.is_empty()
+                && !lossy_str.chars().all(|c| c == 'A')
+                && lossy_str
+                    .chars()
+                    .all(|c| matches!(c, 'A'..='Z' | '2'..='7'))
+        })) {
         addr_str
     } else {
         false
@@ -38,10 +42,13 @@ fuzz_target!(|data: &[u8]| {
     let _ = is_valid_principal;
 
     // Case 3: Test with specific patterns
-    
-    // Pattern 1: All A's (should be rejected as sentinel)
-    let all_a = "A".repeat(56);
-    let addr_all_a = soroban_sdk::Address::Account(env.crypto().keccak256(&all_a.as_bytes()).into());
+
+    // Pattern 1: A valid account strkey (soroban-sdk 27 no longer exposes
+    // `Address::Account`; addresses are built from strkeys instead).
+    let addr_all_a = soroban_sdk::Address::from_str(
+        &env,
+        "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U",
+    );
     let _ = is_zero_or_sentinel_address(&addr_all_a);
 
     // Pattern 2: Empty (should be rejected)
@@ -51,7 +58,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Pattern 3: Too short (should be rejected)
-    let too_short = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";  // 32 chars
+    let too_short = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // 32 chars
     if too_short.len() != 56 {
         // Expected: rejected
     }
@@ -63,8 +70,11 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Pattern 5: Invalid characters (should be rejected)
-    let has_invalid = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA001";  // Has '0' and '1'
-    if has_invalid.chars().any(|c| !matches!(c, 'A'..='Z' | '2'..='7')) {
+    let has_invalid = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA001"; // Has '0' and '1'
+    if has_invalid
+        .chars()
+        .any(|c| !matches!(c, 'A'..='Z' | '2'..='7'))
+    {
         // Expected: rejected
     }
 

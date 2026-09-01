@@ -7,8 +7,8 @@ extern crate std;
 mod tests {
     use earnproof_shared::{ContractError, IssuerError, ProofError};
     use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};
-    use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
     use proof_registry::{ProofRegistryContract, ProofRegistryContractClient};
+    use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
     use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
 
     // The correct 56-character strkey encoding of an all-zero (32-byte)
@@ -139,7 +139,10 @@ mod tests {
         // unregistered issuer lookup finding nothing and the admin staying
         // put — i.e. the initial state is exactly what a rejected
         // registration attempt should have left behind.
-        assert_eq!(issuer_registry.try_get_issuer(&bytes(&env, 1)), Err(Ok(IssuerError::IssuerNotFound)));
+        assert_eq!(
+            issuer_registry.try_get_issuer(&bytes(&env, 1)),
+            Err(Ok(IssuerError::IssuerNotFound))
+        );
         assert_eq!(config.get_admin(), admin);
     }
 }

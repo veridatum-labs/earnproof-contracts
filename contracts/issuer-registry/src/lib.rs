@@ -318,7 +318,6 @@ impl IssuerRegistryContract {
     /// `new_version` must be strictly greater than the current contract
     /// version to prevent pre-approving a downgrade.
     pub fn approve_upgrade(env: Env, wasm_hash: BytesN<32>, new_version: u32) {
-
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -342,7 +341,6 @@ impl IssuerRegistryContract {
 
     /// Admin-only: remove a hash from the allowlist without applying it.
     pub fn revoke_upgrade(env: Env, wasm_hash: BytesN<32>) {
-
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -374,7 +372,6 @@ impl IssuerRegistryContract {
     /// On success the allowlist entry is consumed and `ContractVersion` is
     /// advanced.
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
-
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -413,7 +410,6 @@ impl IssuerRegistryContract {
     }
 
     // ── private helpers ───────────────────────────────────────────────────────
-
 
     fn require_valid_admin(address: &Address) -> Result<(), ContractError> {
         if !earnproof_shared::is_valid_principal_address(address) {
@@ -1180,10 +1176,7 @@ mod test {
         }));
 
         // Must have panicked with "already initialized"
-        assert!(
-            result.is_err(),
-            "re-initialization must panic"
-        );
+        assert!(result.is_err(), "re-initialization must panic");
 
         // Verify state is byte-for-byte identical
         assert_eq!(
@@ -1223,7 +1216,10 @@ mod test {
         }));
 
         // Must have panicked
-        assert!(result.is_err(), "re-initialization by different admin must panic");
+        assert!(
+            result.is_err(),
+            "re-initialization by different admin must panic"
+        );
 
         // Verify state is unchanged: original admin must still be stored
         assert_eq!(

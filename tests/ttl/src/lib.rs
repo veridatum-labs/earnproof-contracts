@@ -49,8 +49,7 @@ mod missing_state;
 /// - extend_ttl(threshold, extend_to): Extends TTL if current TTL <= threshold
 /// - Expiry: entry is expired when ledger.sequence > expiry_ledger
 /// - Boundary: inclusive (at expiry ledger = still valid)
-
 mod harness;
-mod protocol_config_ttl;
 mod issuer_registry_ttl;
 mod proof_registry_ttl;
+mod protocol_config_ttl;

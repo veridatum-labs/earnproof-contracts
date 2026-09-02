@@ -142,9 +142,7 @@ mod tests {
         let fixture = fixture();
         register(&fixture, 4, NOW + 10);
         fixture.clock.set_to(NOW + 10);
-        fixture
-            .proofs
-            .revoke_proof(&bytes(&fixture.clock.env, 4));
+        fixture.proofs.revoke_proof(&bytes(&fixture.clock.env, 4));
         fixture.clock.set_to(NOW + 11);
         assert!(!fixture.proofs.is_valid_proof(&bytes(&fixture.clock.env, 4)));
         assert!(fixture.proofs.is_revoked(&bytes(&fixture.clock.env, 4)));
@@ -180,9 +178,7 @@ mod tests {
     fn maximum_timestamp_is_representable_without_interval_overflow() {
         let fixture = fixture();
         register(&fixture, 9, u64::MAX);
-        assert!(fixture
-            .proofs
-            .is_valid_proof(&bytes(&fixture.clock.env, 9)));
+        assert!(fixture.proofs.is_valid_proof(&bytes(&fixture.clock.env, 9)));
     }
 
     // ── Proof expiry boundary tests ─────────────────────────────────────────
@@ -330,16 +326,12 @@ mod tests {
         register(&fixture, 50, NOW + 100);
         // Revoke well before natural expiry.
         fixture.clock.set_to(NOW + 5);
-        fixture
-            .proofs
-            .revoke_proof(&bytes(&fixture.clock.env, 50));
+        fixture.proofs.revoke_proof(&bytes(&fixture.clock.env, 50));
         // Even though we're before expiry, revocation makes it invalid.
         assert!(!fixture
             .proofs
             .is_valid_proof(&bytes(&fixture.clock.env, 50)));
-        assert!(fixture
-            .proofs
-            .is_revoked(&bytes(&fixture.clock.env, 50)));
+        assert!(fixture.proofs.is_revoked(&bytes(&fixture.clock.env, 50)));
     }
 
     #[test]
@@ -348,12 +340,8 @@ mod tests {
         register(&fixture, 51, NOW + 100);
         let revoke_time = NOW + 42;
         fixture.clock.set_to(revoke_time);
-        fixture
-            .proofs
-            .revoke_proof(&bytes(&fixture.clock.env, 51));
-        let record = fixture
-            .proofs
-            .get_proof(&bytes(&fixture.clock.env, 51));
+        fixture.proofs.revoke_proof(&bytes(&fixture.clock.env, 51));
+        let record = fixture.proofs.get_proof(&bytes(&fixture.clock.env, 51));
         assert_eq!(record.revoked_at, revoke_time);
     }
 
@@ -363,9 +351,7 @@ mod tests {
     fn created_at_matches_registration_timestamp() {
         let fixture = fixture();
         register(&fixture, 60, NOW + 100);
-        let record = fixture
-            .proofs
-            .get_proof(&bytes(&fixture.clock.env, 60));
+        let record = fixture.proofs.get_proof(&bytes(&fixture.clock.env, 60));
         assert_eq!(record.created_at, NOW);
         assert_eq!(record.expires_at, NOW + 100);
         assert_eq!(record.status, ProofStatus::Active);
@@ -375,9 +361,7 @@ mod tests {
     fn revoked_at_zero_until_revoked() {
         let fixture = fixture();
         register(&fixture, 61, NOW + 100);
-        let record = fixture
-            .proofs
-            .get_proof(&bytes(&fixture.clock.env, 61));
+        let record = fixture.proofs.get_proof(&bytes(&fixture.clock.env, 61));
         assert_eq!(record.revoked_at, 0);
     }
 
@@ -468,22 +452,16 @@ mod tests {
         register(&fixture, 80, NOW + 10);
         // Revoke before expiry.
         fixture.clock.set_to(NOW + 5);
-        fixture
-            .proofs
-            .revoke_proof(&bytes(&fixture.clock.env, 80));
+        fixture.proofs.revoke_proof(&bytes(&fixture.clock.env, 80));
         // Advance well past expiry.
         fixture.clock.set_to(NOW + 100);
         // Still revoked, not valid — revocation is terminal.
-        assert!(fixture
-            .proofs
-            .is_revoked(&bytes(&fixture.clock.env, 80)));
+        assert!(fixture.proofs.is_revoked(&bytes(&fixture.clock.env, 80)));
         assert!(!fixture
             .proofs
             .is_valid_proof(&bytes(&fixture.clock.env, 80)));
         // revoked_at was set at the time of revocation, not at expiry.
-        let record = fixture
-            .proofs
-            .get_proof(&bytes(&fixture.clock.env, 80));
+        let record = fixture.proofs.get_proof(&bytes(&fixture.clock.env, 80));
         assert_eq!(record.revoked_at, NOW + 5);
     }
 }

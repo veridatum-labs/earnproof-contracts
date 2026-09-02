@@ -726,7 +726,7 @@ mod test {
     /// approaching u32::MAX (bumping is protected by checked_add).
     #[test]
     fn config_version_safe_near_u32_max() {
-        let (env, client, _admin) = setup();
+        let (_env, client, _admin) = setup();
 
         // Manually set config version to a value near max by simulating
         // many mutations. We'll do a smaller simulation here.
@@ -741,15 +741,21 @@ mod test {
         // starting from the value established by the previous mutation.
         for _ in 0..10 {
             client.pause();
-            v = client.get_config_version();
-            client.unpause();
-            let after = client.get_config_version();
+            let after_pause = client.get_config_version();
             assert_eq!(
-                after,
+                after_pause,
                 v + 1,
+                "pause must bump config version exactly once"
+            );
+
+            client.unpause();
+            let after_unpause = client.get_config_version();
+            assert_eq!(
+                after_unpause,
+                after_pause + 1,
                 "unpause must bump config version exactly once"
             );
-            v = after;
+            v = after_unpause;
         }
     }
 

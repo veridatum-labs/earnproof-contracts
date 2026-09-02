@@ -766,7 +766,6 @@ dependencies = [
 name = "encoding-vector-tests"
 version = "0.1.0"
 dependencies = [
- "sha2",
  "earnproof-shared",
  "issuer-registry",
  "proof-registry",
@@ -802,6 +801,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys",
+]
+
+[[package]]
 name = "error-catalog-tests"
 version = "0.1.0"
 dependencies = [
@@ -810,13 +819,6 @@ dependencies = [
  "proof-registry",
  "protocol-config",
  "soroban-sdk",
-name = "errno"
-version = "0.3.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
-dependencies = [
- "libc",
- "windows-sys",
 ]
 
 [[package]]
@@ -2150,7 +2152,6 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "ttl-tests"
-name = "ttl-boundary-tests"
 version = "0.1.0"
 dependencies = [
  "earnproof-shared",

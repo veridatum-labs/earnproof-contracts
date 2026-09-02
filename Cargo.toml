@@ -13,12 +13,11 @@ members = [
   "tests/property",
   "tests/time",
   "tests/encoding",
-  "tests/ttl"
-  "tests/storage-keys"
-  "tests/error-catalog"
-  "tests/ledger-snapshots"
-  "tests/address-validation",
   "tests/ttl",
+  "tests/storage-keys",
+  "tests/error-catalog",
+  "tests/ledger-snapshots",
+  "tests/address-validation",
   "fuzz"
 ]
 resolver = "2"

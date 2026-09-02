@@ -158,7 +158,12 @@ fn lookup_helpers_agree_with_the_inventory() {
         namespaces_for("proof-registry", StorageClass::Instance).collect();
     assert_eq!(
         instance,
-        std::vec!["Admin", "IssuerRegistry", "ProtocolConfig"]
+        std::vec![
+            "Admin",
+            "ContractVersion",
+            "IssuerRegistry",
+            "ProtocolConfig"
+        ]
     );
 
     assert_eq!(

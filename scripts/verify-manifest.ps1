@@ -44,7 +44,7 @@ function Assert-Sha256($Name, $Value) {
     throw "$Name WASM hash is missing."
   }
 
-  if ($Value -match "0{16,}" -and $not $AllowPlaceholders) {
+  if ($Value -match "0{16,}" -and -not $AllowPlaceholders) {
     throw "$Name WASM hash is still a placeholder."
   }
 

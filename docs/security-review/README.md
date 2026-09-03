@@ -433,16 +433,16 @@ Test inventory at this commit:
 |---|---|---|
 | Address validation | `tests/address-validation/src/lib.rs` | 5 |
 | Authorization | `tests/authorization/src/lib.rs` | 21 |
-| State machine | `tests/state-machine/src/lib.rs` | 5 |
+| State machine | `tests/property/state_machine.rs` | 5 |
 | Cross-contract atomicity | `tests/cross-contract/src/lib.rs` | 35 |
 | Emergency and recovery | `tests/emergency/src/lib.rs` | 30 |
-| Encoding vectors | `tests/encoding-vector/src/lib.rs` | 5 |
+| Encoding vectors | `tests/encoding/src/lib.rs` | 5 |
 | Error catalog | `tests/error-catalog/src/lib.rs` | 31 |
 | Event fixtures | `tests/event-fixtures/src/lib.rs` | 13 |
 | Event assertions | `tests/events/src/lib.rs` | 50 |
 | `issuer-registry` | `contracts/issuer-registry/src/lib.rs` | 37 |
 | Ledger snapshots | `tests/ledger-snapshots/src/lib.rs` | 8 |
-| Ledger time | `tests/ledger-time/src/lib.rs` | 19 |
+| Ledger time | `tests/time/src/lib.rs` | 19 |
 | `proof-registry` | `contracts/proof-registry/src/lib.rs` | 39 |
 | `protocol-config` | `contracts/protocol-config/src/lib.rs` | 34 |
 | Resource budgets | `tests/budgets/src/lib.rs` | 17 |

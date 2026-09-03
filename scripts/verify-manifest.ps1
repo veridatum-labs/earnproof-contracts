@@ -497,7 +497,7 @@ if ($Live) {
   if ($script:LiveFailures.Count -gt 0) {
     Write-Host ""
     Write-Host "$($script:LiveFailures.Count) live check(s) failed." -ForegroundColor Red
-    exit 1
+    throw "$($script:LiveFailures.Count) live check(s) failed."
   }
 
   Write-Host "All live on-chain checks passed." -ForegroundColor Green

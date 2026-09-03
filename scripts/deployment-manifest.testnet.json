@@ -14,9 +14,9 @@
     "metadataHash": "75f7b32c6a13e9d7000b52b33ee1a657dd1359a6bd79837af6fdc6a1d393d87b"
   },
   "contracts": {
-    "protocolConfig": "CC3OREX5QBIKJ5JOW36JFJNW7TLAKJOVT5WJXEITGALO7MU32KHCS2A",
-    "issuerRegistry": "CB73TWVVJIIVNTKLWSHZB5NL2UIF3B3EUL4YH4MUD6EYX6SFIHE77D2F",
-    "proofRegistry": "CCMTAXBWN2ZGEDEVKGHT6GQENZSTBSLQAGYGGKJWNMDSTRT2QNMMNWRK"
+    "protocolConfig": "CC3OREX5QBIKJ5JOW36JFJJW7TLAKJOVT5WJXEITGALO7MU32KHICS2A",
+    "issuerRegistry": "CB73TVWVJIIVNTKLWSHZB5NL2UIF3B3EUL4YH4MUD6EYX6SFIHE77D2F",
+    "proofRegistry": "CCMTAXBWN2ZGEDVKGHT6GQENZSTBSLQAGYGGKJWNMDSTVRT2QNMMNWRK"
   },
   "wasm": {
     "protocolConfig": {
@@ -71,9 +71,9 @@
     "proofRegistryInitialize": "https://stellar.expert/explorer/testnet/tx/8b297500f82c5439033c6f221a3aa873c889fa0ac64ea0dff87077a785c68785"
   },
   "explorer": {
-    "protocolConfig": "https://lab.stellar.org/r/testnet/contract/CC3OREX1QBIKJ5JOW36JFJNW7TLAKJOVT5WJXEITGALO7MU32KHCS2A",
-    "issuerRegistry": "https://lab.stellar.org/r/testnet/contract/CB73TWVVJIIVNTKLWSHZB5NL2UIF3B3EUL4YH4MUD6EYX6SFIHE77D2F",
-    "proofRegistry": "https://lab.stellar.org/r/testnet/contract/CCMTAXBWN2ZGEDEVKGHT6GQENZSTBSLQAGYWGKJWNMDSTRT2QNMMNWRK"
+    "protocolConfig": "https://lab.stellar.org/r/testnet/contract/CC3OREX5QBIKJ5JOW36JFJJW7TLAKJOVT5WJXEITGALO7MU32KHICS2A",
+    "issuerRegistry": "https://lab.stellar.org/r/testnet/contract/CB73TVWVJIIVNTKLWSHZB5NL2UIF3B3EUL4YH4MUD6EYX6SFIHE77D2F",
+    "proofRegistry": "https://lab.stellar.org/r/testnet/contract/CCMTAXBWN2ZGEDVKGHT6GQENZSTBSLQAGYGGKJWNMDSTVRT2QNMMNWRK"
   },
   "commands": [
     "rustup target add wasm32v1-none",

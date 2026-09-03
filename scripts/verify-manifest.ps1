@@ -83,7 +83,7 @@ if (-not (Get-Command Invoke-StellarRead -CommandType Function -ErrorAction Sile
     param(
       [string]$ContractId,
       [string]$Function,
-      [string[]]$Args = @(),
+      [string[]]$FunctionArgs = @(),
       [string]$Network,
       [string]$CliPath,
       [int]$TimeoutSeconds,
@@ -97,7 +97,7 @@ if (-not (Get-Command Invoke-StellarRead -CommandType Function -ErrorAction Sile
       "--network", $Network,
       "--"
       $Function
-    ) + $Args
+    ) + $FunctionArgs
 
     $transientPatterns = @(
       "timeout",
@@ -459,7 +459,7 @@ if ($Live) {
 
   Write-Host "Checking protocolConfig schema version approvals..."
   foreach ($ver in $manifestJson.schemaVersions) {
-    $approved = Invoke-StellarRead -ContractId $protocolConfigId -Function "is_schema_approved" -Args @("--version", "$ver") @liveParams
+    $approved = Invoke-StellarRead -ContractId $protocolConfigId -Function "is_schema_approved" -FunctionArgs @("--version", "$ver") @liveParams
     $approvedBool = ($approved.Trim() -ieq "true")
     Assert-LiveCondition "protocolConfig schema version $ver approved" $approvedBool "is_schema_approved returned false for version $ver"
   }
@@ -473,7 +473,7 @@ if ($Live) {
   if ($manifestJson.initialIssuer) {
     $issuerAddr = $manifestJson.initialIssuer.address
     Write-Host "Checking issuerRegistry issuer status for $issuerAddr..."
-    $issuerStatus = Invoke-StellarRead -ContractId $issuerRegistryId -Function "get_issuer_status" -Args @("--address", $issuerAddr) @liveParams
+    $issuerStatus = Invoke-StellarRead -ContractId $issuerRegistryId -Function "get_issuer_status" -FunctionArgs @("--address", $issuerAddr) @liveParams
     $cleanStatus = $issuerStatus.Trim() -replace '^"(.*)"$', '$1'
     Assert-LiveCondition "issuerRegistry initialIssuer status" ($cleanStatus -ne "NotFound") "get_issuer_status returned NotFound for $issuerAddr"
   }

@@ -124,9 +124,9 @@ function Invoke-VerifyWithMock {
 
   $wrapperLines = $htLines + @(
     'function Invoke-StellarRead {'
-    '  param([string]$ContractId,[string]$Function,[string[]]$Args=@(),[string]$Network,[string]$CliPath,[int]$TimeoutSeconds,[int]$MaxRetries)'
+    '  param([string]$ContractId,[string]$Function,[string[]]$FunctionArgs=@(),[string]$Network,[string]$CliPath,[int]$TimeoutSeconds,[int]$MaxRetries)'
     '  $key = "$ContractId|$Function"'
-    '  if ($Args.Count -gt 0) { $argStr = ($Args | Where-Object { $_ -notmatch "^--" }) -join ","; if ($argStr) { $key += "|$argStr" } }'
+    '  if ($FunctionArgs.Count -gt 0) { $argStr = ($FunctionArgs | Where-Object { $_ -notmatch "^--" }) -join ","; if ($argStr) { $key += "|$argStr" } }'
     '  if (-not $MockTable.ContainsKey($key)) { throw "Unexpected mock call: $key" }'
     '  $val = $MockTable[$key]'
     '  if ($val -eq "__TIMEOUT__") { throw [System.TimeoutException]"mock timeout" }'
@@ -269,9 +269,9 @@ Invoke-Test "live mode reader timeout fails" {
 
   $wrapperLines = $htLines + @(
     'function Invoke-StellarRead {'
-    '  param([string]$ContractId,[string]$Function,[string[]]$Args=@(),[string]$Network,[string]$CliPath,[int]$TimeoutSeconds,[int]$MaxRetries)'
+    '  param([string]$ContractId,[string]$Function,[string[]]$FunctionArgs=@(),[string]$Network,[string]$CliPath,[int]$TimeoutSeconds,[int]$MaxRetries)'
     '  $key = "$ContractId|$Function"'
-    '  if ($Args.Count -gt 0) { $argStr = ($Args | Where-Object { $_ -notmatch "^--" }) -join ","; if ($argStr) { $key += "|$argStr" } }'
+    '  if ($FunctionArgs.Count -gt 0) { $argStr = ($FunctionArgs | Where-Object { $_ -notmatch "^--" }) -join ","; if ($argStr) { $key += "|$argStr" } }'
     '  if (-not $MockTable.ContainsKey($key)) { throw "Unexpected mock call: $key" }'
     '  $val = $MockTable[$key]'
     '  if ($val -eq "__TIMEOUT__") { throw [System.TimeoutException]"mock timeout" }'
@@ -328,14 +328,14 @@ Invoke-Test "live mode uses mocked reader and succeeds" {
   $wrapperLines = $htLines + @(
     '$CallCount = [int](Get-Content "' + $counterEsc + '")'
     'function Invoke-StellarRead {'
-    '  param([string]$ContractId,[string]$Function,[string[]]$Args=@(),[string]$Network,[string]$CliPath,[int]$TimeoutSeconds,[int]$MaxRetries)'
+    '  param([string]$ContractId,[string]$Function,[string[]]$FunctionArgs=@(),[string]$Network,[string]$CliPath,[int]$TimeoutSeconds,[int]$MaxRetries)'
     '  # Count protocolConfig get_admin so the test proves the mock reader is used.'
     '  if ($ContractId -eq "' + $PC_ID + '" -and $Function -eq "get_admin") {'
     '    $script:CallCount++'
     '    Set-Content "' + $counterEsc + '" $script:CallCount'
     '  }'
     '  $key = "$ContractId|$Function"'
-    '  if ($Args.Count -gt 0) { $argStr = ($Args | Where-Object { $_ -notmatch "^--" }) -join ","; if ($argStr) { $key += "|$argStr" } }'
+    '  if ($FunctionArgs.Count -gt 0) { $argStr = ($FunctionArgs | Where-Object { $_ -notmatch "^--" }) -join ","; if ($argStr) { $key += "|$argStr" } }'
     '  if (-not $MockTable.ContainsKey($key)) { throw "Unexpected mock call: $key" }'
     '  return $MockTable[$key]'
     '}'

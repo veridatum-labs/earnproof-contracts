@@ -27,7 +27,7 @@ mod tests {
     //
     // CPU instructions measured on:
     // - Soroban SDK v27.0.0
-    // - Rust toolchain 1.83.0
+    // - Rust stable from rust-toolchain.toml
     // - x86_64-unknown-linux-gnu
     //
     // Update these values when:

@@ -44,7 +44,7 @@ stateDiagram-v2
 2. **Inclusive Expiration Boundary**: A proof is valid at the exact boundary `ledger.timestamp() == expires_at`, and strictly invalid once `ledger.timestamp() > expires_at` (`tests/time/src/lib.rs::validity_is_inclusive_at_expiration_and_false_after`).
 3. **Revocation Dominance**: Revocation is permanent and overrides expiration. A revoked proof evaluates to `is_valid_proof == false` indefinitely, including when `now < expires_at` (`tests/time/src/lib.rs::revocation_dominates_expiration`).
 4. **Multi-Authority Revocation**: Both the issuing institution and the contract administrator hold independent revocation authority; neither can revoke an already revoked proof (`contracts/proof-registry/src/lib.rs::set_revoked`).
-5. **Cross-Contract Fail-Closed Atomicity**: Registration verifies `protocol-config` (unpaused and schema approved) and `issuer-registry` (issuer active). Failure of any dependency aborts the invocation, committing no state changes and extending no TTLs (`tests/cross-contract/src/boundaries.rs::registration_rolls_back_when_the_pause_read_fails`).
+5. **Cross-Contract Fail-Closed Atomicity**: Registration verifies `protocol-config` (unpaused and schema approved) and `issuer-registry` (issuer active). Failure of any dependency aborts the invocation, committing no state changes and extending no TTLs (`tests/cross-contract/src/boundaries.rs::a_rejected_pause_read_leaves_no_proof_record`).
 
 ---
 
@@ -75,7 +75,7 @@ stateDiagram-v2
 - `tests/time/src/lib.rs::revocation_dominates_expiration`: Asserts revocation renders proof invalid across all time ranges.
 - `tests/events/src/ghost.rs::revoking_an_unknown_proof_emits_no_event`: Asserts revoking non-existent proof emits zero events.
 - `tests/events/src/ghost.rs::duplicate_proof_id_emits_no_event`: Asserts duplicate proof registration emits zero events.
-- `tests/cross-contract/src/boundaries.rs::registration_rolls_back_when_the_pause_read_fails`: Asserts fail-closed rollback on dependency error.
+- `tests/cross-contract/src/boundaries.rs::a_rejected_pause_read_leaves_no_proof_record`: Asserts fail-closed rollback on dependency error.
 
 ---
 

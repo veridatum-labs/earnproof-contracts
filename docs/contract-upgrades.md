@@ -81,7 +81,7 @@ tolerate the old encoding.**
    emits `ContractUpgraded { new_wasm_hash, old_contract_version,
    new_contract_version, upgraded_by }`.
 7. **Verify post-upgrade** using
-   [`scripts/verify-deployment.ps1`](../scripts/verify-deployment.ps1)
+   [`scripts/verify-manifest.ps1 -Live`](../scripts/verify-manifest.ps1)
    (read-only — see [issue #96](https://github.com/veridatum-labs/earnproof-contracts/issues/96)):
    confirm the contract responds correctly to its existing read-only calls
    against pre-upgrade state (e.g. `get_proof`/`get_issuer` for a record
@@ -200,7 +200,7 @@ where consumers depend on the result:
 3. **Rehearse the upgrade sequence against a sandbox/testnet deployment**
    of the *current* production contract state (not a fresh contract) —
    `approve_upgrade` → `upgrade_contract` → re-run
-   `scripts/verify-deployment.ps1` against it. This is the only way to
+   `scripts/verify-manifest.ps1 -Live` against it. This is the only way to
    catch a storage-decode failure before it happens against real state,
    since `cargo test` exercises the new contract's own test fixtures, not
    an existing contract's accumulated storage.
@@ -279,7 +279,7 @@ service-level commitments:
 | Build + hash recording | Minutes |
 | Sandbox/testnet rehearsal (§ Upgrade testing procedures) | 1–2 hours, including the downgrade-guard checks |
 | Allowlist → verify → apply on target network | Minutes, but do not compress the gap between `approve_upgrade` and `upgrade_contract` — that gap is what makes the allowlist auditable before it's irreversible |
-| Post-upgrade verification | 15–30 minutes running `scripts/verify-deployment.ps1` |
+| Post-upgrade verification | 15–30 minutes running `scripts/verify-manifest.ps1 -Live` |
 | Backend coordination lead time | Highly variable; for a hash-construction change, backend and contract deploys should be scheduled together, not sequentially |
 
 A breaking change should budget at least one full business day between

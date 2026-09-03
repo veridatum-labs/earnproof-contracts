@@ -58,8 +58,8 @@ Thresholds are intentionally conservative to force explicit review of resource c
 
 Measurements taken on:
 - **Soroban SDK**: v27.0.0
-- **Rust toolchain**: As pinned in `rust-toolchain.toml` (1.83.0)
-- **Target**: wasm32-unknown-unknown
+- **Rust toolchain**: Stable, as pinned in `rust-toolchain.toml`
+- **Target**: wasm32v1-none
 - **Build profile**: release with overflow-checks=true
 
 ## Running Tests
@@ -79,7 +79,7 @@ cargo test -p resource-budget-tests -- --nocapture
 ./scripts/measure-resources.ps1
 ```
 
-**Note**: WASM size measurement requires building contracts for the `wasm32-unknown-unknown` target in release mode. Due to Soroban SDK v27.0.0 requirements, this may require specific Rust toolchain versions. The script is provided for local testing but is not currently enforced in CI.
+**Note**: WASM size measurement requires building contracts for the `wasm32v1-none` target in release mode. Due to Soroban SDK v27.0.0 requirements, this requires Rust 1.84 or newer. The script is provided for local testing but is not currently enforced in CI.
 
 ### Verbose WASM measurement:
 ```pwsh

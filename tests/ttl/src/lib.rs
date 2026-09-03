@@ -32,8 +32,6 @@ mod expiry;
 #[cfg(test)]
 mod restoration;
 
-#[cfg(test)]
-mod missing_state;
 /// TTL Expiration and Restoration Boundary Tests
 ///
 /// Comprehensive deterministic tests for TTL (Time-To-Live) boundaries across
@@ -51,5 +49,7 @@ mod missing_state;
 /// - Boundary: inclusive (at expiry ledger = still valid)
 mod harness;
 mod issuer_registry_ttl;
+#[cfg(test)]
+mod missing_state;
 mod proof_registry_ttl;
 mod protocol_config_ttl;

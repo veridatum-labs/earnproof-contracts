@@ -44,7 +44,7 @@ function Assert-Sha256($Name, $Value) {
     throw "$Name WASM hash is missing."
   }
 
-  if ($Value -match "0{16,}" -and $not $AllowPlaceholders) {
+  if ($Value -match "0{16,}" -and -not $AllowPlaceholders) {
     throw "$Name WASM hash is still a placeholder."
   }
 
@@ -78,101 +78,103 @@ function Assert-StellarAddress($Name, $Value) {
   Retries up to $MaxRetries times on transient errors (timeout, connection
   reset, unavailable).  Throws with a clear message on persistent failure.
 #>
-function Invoke-StellarRead {
-  param(
-    [string]$ContractId,
-    [string]$Function,
-    [string[]]$Args = @(),
-    [string]$Network,
-    [string]$CliPath,
-    [int]$TimeoutSeconds,
-    [int]$MaxRetries
-  )
+if (-not (Get-Command Invoke-StellarRead -CommandType Function -ErrorAction SilentlyContinue)) {
+  function Invoke-StellarRead {
+    param(
+      [string]$ContractId,
+      [string]$Function,
+      [string[]]$FunctionArgs = @(),
+      [string]$Network,
+      [string]$CliPath,
+      [int]$TimeoutSeconds,
+      [int]$MaxRetries
+    )
 
-  # Build argument list
-  $cmdArgs = @(
-    "contract", "invoke",
-    "--id", $ContractId,
-    "--network", $Network,
-    "--"
-    $Function
-  ) + $Args
+    # Build argument list
+    $cmdArgs = @(
+      "contract", "invoke",
+      "--id", $ContractId,
+      "--network", $Network,
+      "--"
+      $Function
+    ) + $FunctionArgs
 
-  $transientPatterns = @(
-    "timeout",
-    "connection reset",
-    "connection refused",
-    "temporarily unavailable",
-    "send failure",
-    "503",
-    "502",
-    "504"
-  )
+    $transientPatterns = @(
+      "timeout",
+      "connection reset",
+      "connection refused",
+      "temporarily unavailable",
+      "send failure",
+      "503",
+      "502",
+      "504"
+    )
 
-  $attempt = 0
-  while ($true) {
-    $attempt++
+    $attempt = 0
+    while ($true) {
+      $attempt++
 
-    # Use temp files so Start-Process can redirect stdout/stderr without
-    # blocking the calling thread.  This is what makes the timeout real.
-    $stdoutFile = [System.IO.Path]::GetTempFileName()
-    $stderrFile = [System.IO.Path]::GetTempFileName()
+      # Use temp files so Start-Process can redirect stdout/stderr without
+      # blocking the calling thread. This is what makes the timeout real.
+      $stdoutFile = [System.IO.Path]::GetTempFileName()
+      $stderrFile = [System.IO.Path]::GetTempFileName()
 
-    try {
-      $proc = Start-Process `
-        -FilePath $CliPath `
-        -ArgumentList $cmdArgs `
-        -RedirectStandardOutput $stdoutFile `
-        -RedirectStandardError  $stderrFile `
-        -NoNewWindow `
-        -PassThru
+      try {
+        $proc = Start-Process `
+          -FilePath $CliPath `
+          -ArgumentList $cmdArgs `
+          -RedirectStandardOutput $stdoutFile `
+          -RedirectStandardError  $stderrFile `
+          -NoNewWindow `
+          -PassThru
 
-      $finished = $proc.WaitForExit($TimeoutSeconds * 1000)
+        $finished = $proc.WaitForExit($TimeoutSeconds * 1000)
 
-      if (-not $finished) {
-        # Kill the hung process before throwing so it doesn't linger.
-        try { $proc.Kill() } catch { }
-        throw [System.TimeoutException]::new(
-          "stellar CLI timed out after ${TimeoutSeconds}s calling ${Function} on contract ${ContractId}."
-        )
-      }
-
-      $exitCode = $proc.ExitCode
-      $stdout   = (Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue) ?? ""
-      $stderr   = (Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue) ?? ""
-      $output   = ($stdout + $stderr).Trim()
-
-      if ($exitCode -ne 0) {
-        $isTransient = $false
-        foreach ($pattern in $transientPatterns) {
-          if ($output -imatch $pattern) {
-            $isTransient = $true
-            break
-          }
+        if (-not $finished) {
+          # Kill the hung process before throwing so it doesn't linger.
+          try { $proc.Kill() } catch { }
+          throw [System.TimeoutException]::new(
+            "stellar CLI timed out after ${TimeoutSeconds}s calling ${Function} on contract ${ContractId}."
+          )
         }
 
-        if ($isTransient -and $attempt -lt $MaxRetries) {
-          Write-Warning "Transient RPC error on attempt $attempt for ${Function} (contract $ContractId). Retrying..."
+        $exitCode = $proc.ExitCode
+        $stdout   = (Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue) ?? ""
+        $stderr   = (Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue) ?? ""
+        $output   = ($stdout + $stderr).Trim()
+
+        if ($exitCode -ne 0) {
+          $isTransient = $false
+          foreach ($pattern in $transientPatterns) {
+            if ($output -imatch $pattern) {
+              $isTransient = $true
+              break
+            }
+          }
+
+          if ($isTransient -and $attempt -lt $MaxRetries) {
+            Write-Warning "Transient RPC error on attempt $attempt for ${Function} (contract $ContractId). Retrying..."
+            Start-Sleep -Seconds ([math]::Min(2 * $attempt, 10))
+            continue
+          }
+
+          throw "CLI error calling ${Function} on contract ${ContractId} (exit $exitCode): $output"
+        }
+
+        return $stdout.Trim()
+      }
+      catch [System.TimeoutException] {
+        if ($attempt -lt $MaxRetries) {
+          Write-Warning "Timeout on attempt $attempt for ${Function} (contract $ContractId). Retrying..."
           Start-Sleep -Seconds ([math]::Min(2 * $attempt, 10))
           continue
         }
-
-        throw "CLI error calling ${Function} on contract ${ContractId} (exit $exitCode): $output"
+        throw "Timed out after $MaxRetries attempt(s) calling ${Function} on contract ${ContractId}."
       }
-
-      return $stdout.Trim()
-    }
-    catch [System.TimeoutException] {
-      if ($attempt -lt $MaxRetries) {
-        Write-Warning "Timeout on attempt $attempt for ${Function} (contract $ContractId). Retrying..."
-        Start-Sleep -Seconds ([math]::Min(2 * $attempt, 10))
-        continue
+      finally {
+        Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue
+        Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
       }
-      throw "Timed out after $MaxRetries attempt(s) calling ${Function} on contract ${ContractId}."
-    }
-    finally {
-      Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue
-      Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
     }
   }
 }
@@ -457,7 +459,7 @@ if ($Live) {
 
   Write-Host "Checking protocolConfig schema version approvals..."
   foreach ($ver in $manifestJson.schemaVersions) {
-    $approved = Invoke-StellarRead -ContractId $protocolConfigId -Function "is_schema_approved" -Args @("--version", "$ver") @liveParams
+    $approved = Invoke-StellarRead -ContractId $protocolConfigId -Function "is_schema_approved" -FunctionArgs @("--version", "$ver") @liveParams
     $approvedBool = ($approved.Trim() -ieq "true")
     Assert-LiveCondition "protocolConfig schema version $ver approved" $approvedBool "is_schema_approved returned false for version $ver"
   }
@@ -471,7 +473,7 @@ if ($Live) {
   if ($manifestJson.initialIssuer) {
     $issuerAddr = $manifestJson.initialIssuer.address
     Write-Host "Checking issuerRegistry issuer status for $issuerAddr..."
-    $issuerStatus = Invoke-StellarRead -ContractId $issuerRegistryId -Function "get_issuer_status" -Args @("--address", $issuerAddr) @liveParams
+    $issuerStatus = Invoke-StellarRead -ContractId $issuerRegistryId -Function "get_issuer_status" -FunctionArgs @("--address", $issuerAddr) @liveParams
     $cleanStatus = $issuerStatus.Trim() -replace '^"(.*)"$', '$1'
     Assert-LiveCondition "issuerRegistry initialIssuer status" ($cleanStatus -ne "NotFound") "get_issuer_status returned NotFound for $issuerAddr"
   }
@@ -495,7 +497,7 @@ if ($Live) {
   if ($script:LiveFailures.Count -gt 0) {
     Write-Host ""
     Write-Host "$($script:LiveFailures.Count) live check(s) failed." -ForegroundColor Red
-    exit 1
+    throw "$($script:LiveFailures.Count) live check(s) failed."
   }
 
   Write-Host "All live on-chain checks passed." -ForegroundColor Green

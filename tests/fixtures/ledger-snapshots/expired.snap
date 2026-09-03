@@ -1,7 +1,7 @@
 # scenario: expired
-# revision: 3
-# reason: initial snapshots of the five representative lifecycle states
-# body-digest: 546ebb8d2c689369f35148cdc3e91fa83ecc10a2d53b65d5bb22a4105a1b1840
+# revision: 4
+# reason: contract version keys are now persisted in initialized ledgers
+# body-digest: ea53da0c2caa39527a07845f7e983d0ccf44f1e35c28ffa41ecd0bd20e455313
 
 [ledger]
 sequence = 1000
@@ -9,14 +9,17 @@ timestamp = 2001
 
 [storage]
 issuer-registry instance [sym:Admin] = addr:admin
+issuer-registry instance [sym:ContractVersion] = u32:1
 issuer-registry persistent [sym:AddressIssuer, addr:issuer] = bytes:1111111111111111111111111111111111111111111111111111111111111111
 issuer-registry persistent [sym:Issuer, bytes:1111111111111111111111111111111111111111111111111111111111111111] = {sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222, sym:status: [sym:Active], sym:updated_at: u64:1000}
 proof-registry instance [sym:Admin] = addr:admin
+proof-registry instance [sym:ContractVersion] = u32:1
 proof-registry instance [sym:IssuerRegistry] = addr:issuer-registry
 proof-registry instance [sym:ProtocolConfig] = addr:protocol-config
 proof-registry persistent [sym:Proof, bytes:3333333333333333333333333333333333333333333333333333333333333333] = {sym:commitment_hash: bytes:4444444444444444444444444444444444444444444444444444444444444444, sym:created_at: u64:1000, sym:expires_at: u64:2000, sym:issuer_address: addr:issuer, sym:proof_id_hash: bytes:3333333333333333333333333333333333333333333333333333333333333333, sym:revoked_at: u64:0, sym:schema_version: u32:1, sym:status: [sym:Active]}
 protocol-config instance [sym:Admin] = addr:admin
 protocol-config instance [sym:ConfigVersion] = u32:2
+protocol-config instance [sym:ContractVersion] = u32:1
 protocol-config instance [sym:Paused] = false
 protocol-config persistent [sym:SchemaVersion, u32:1] = true
 

@@ -10,13 +10,9 @@ mod tests {
     use crate::harness::TtlTestHarness;
     use earnproof_shared::TTL_THRESHOLD_LEDGERS;
     use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
-    use soroban_sdk::{testutils::storage::Instance, Address, BytesN, Env};
+    use soroban_sdk::{testutils::storage::Instance, Address, Env};
 
     const ADMIN: &str = "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR";
-
-    fn bytes(env: &Env, value: u8) -> BytesN<32> {
-        BytesN::from_array(env, &[value; 32])
-    }
 
     fn admin_addr(env: &Env) -> Address {
         Address::from_str(env, ADMIN)

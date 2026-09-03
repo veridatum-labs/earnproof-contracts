@@ -53,6 +53,10 @@ pub fn config_version_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "ConfigVersion"),)
 }
 
+pub fn contract_version_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "ContractVersion"),)
+}
+
 pub fn schema_version_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaVersion"), version)
 }

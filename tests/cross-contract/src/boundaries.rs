@@ -14,13 +14,9 @@
 //! *ordering* of the steps observable: a dependency that rejects every call
 //! turns "which check ran first" into an assertion rather than a claim.
 
-use earnproof_shared::{ProofError, ProofRecord, ProofStatus, TTL_THRESHOLD_LEDGERS};
-use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke};
+use earnproof_shared::{ProofError, ProofRecord, ProofStatus};
+use soroban_sdk::testutils::{Address as _, Events as _, MockAuth, MockAuthInvoke};
 use soroban_sdk::{Address, BytesN, IntoVal};
-
-use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};
-use proof_registry::ProofRegistryContract;
-use protocol_config::ProtocolConfigContract;
 
 use crate::harness::{
     assert_unchanged, commitment, hash, outcome_of, proof_key, Deployment, Rejection,
@@ -332,9 +328,6 @@ fn an_unapproved_schema_is_rejected_after_the_pause_check_but_before_the_issuer_
     // issuer-registry is unreachable, we'd get `Aborted` instead of `Typed`.
     // This test verifies that the schema check happens after the pause check
     // but before the issuer check.
-    let deployment = Deployment::with_dependency_addresses(|env, _config, issuers| {
-        (env.register(RejectsSchemaRead, ()), issuers)
-    });
     // Can't test this directly because the schema read itself fails. Instead,
     // test with real config that unapproves the schema.
     let deployment = Deployment::new();
@@ -481,7 +474,7 @@ fn a_failed_registration_rolls_back_writes_inside_the_dependency() {
     // `is_paused()` call. If the registration fails after that (e.g. during
     // the issuer check), that write must be rolled back too. This test verifies
     // the rollback reaches the callee.
-    let deployment = Deployment::with_dependency_addresses(|env, _config, issuers| {
+    let deployment = Deployment::with_dependency_addresses(|env, _config, _issuers| {
         let recording = env.register(RecordingConfig, ());
         // Write to the recording config's storage during the pause read, then
         // fail the issuer check so the transaction rolls back.

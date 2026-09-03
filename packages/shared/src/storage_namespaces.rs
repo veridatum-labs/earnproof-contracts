@@ -86,7 +86,7 @@ pub struct StorageNamespace {
 /// Adding a row here is the second half of adding a storage key; the first is
 /// adding the `DataKey` variant. Doing one without the other fails the tests in
 /// `tests/storage-keys/`.
-pub const STORAGE_NAMESPACES: [StorageNamespace; 11] = [
+pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
     StorageNamespace {
         contract: "issuer-registry",
         namespace: "AddressIssuer",
@@ -105,6 +105,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 11] = [
     },
     StorageNamespace {
         contract: "issuer-registry",
+        namespace: "ContractVersion",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
         namespace: "Issuer",
         arity: 1,
         class: StorageClass::Persistent,
@@ -117,6 +125,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 11] = [
         arity: 0,
         class: StorageClass::Instance,
         value: "Address",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ContractVersion",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
         owner: "deployment operator",
     },
     StorageNamespace {
@@ -154,6 +170,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 11] = [
     StorageNamespace {
         contract: "protocol-config",
         namespace: "ConfigVersion",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
+        namespace: "ContractVersion",
         arity: 0,
         class: StorageClass::Instance,
         value: "u32",

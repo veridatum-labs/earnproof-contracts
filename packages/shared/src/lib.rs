@@ -1,7 +1,5 @@
 #![no_std]
 
-extern crate alloc;
-
 use soroban_sdk::{contracterror, contracttype, Address, BytesN};
 
 pub mod storage_namespaces;
@@ -179,10 +177,9 @@ pub struct ProofRecord {
 #[cfg(test)]
 pub mod test_utils {
     extern crate std;
+    use super::*;
     use std::vec;
     use std::vec::Vec;
-    use super::*;
-    use alloc::{vec, vec::Vec};
 
     /// Represents the expected state after successful initialization.
     /// Used to verify that first initialization produces exactly the documented

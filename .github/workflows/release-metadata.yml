@@ -49,16 +49,22 @@ jobs:
         run: |
           # The template is full of placeholders. If it ever passed validation,
           # a note copied from it and left unfilled would pass too.
-          $ErrorActionPreference = "Continue"
-          ./scripts/verify-manifest.ps1 `
-            -Manifest scripts/deployment-manifest.testnet.json `
-            -Release docs/releases/TEMPLATE.md 2>$null
+          $ErrorActionPreference = "Stop"
+          $templateRejected = $false
+          try {
+            ./scripts/verify-manifest.ps1 `
+              -Manifest scripts/deployment-manifest.testnet.json `
+              -Release docs/releases/TEMPLATE.md
+          }
+          catch {
+            $templateRejected = $true
+            Write-Host "Template correctly rejected: $($_.Exception.Message)"
+          }
 
-          if ($LASTEXITCODE -eq 0) {
+          if (-not $templateRejected) {
             Write-Host "::error::docs/releases/TEMPLATE.md passed release validation; placeholders are not being rejected"
             exit 1
           }
-          Write-Host "Template correctly rejected."
 
       - name: Verifier test suite
         shell: pwsh

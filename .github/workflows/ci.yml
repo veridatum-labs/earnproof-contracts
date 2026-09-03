@@ -73,7 +73,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-fuzz --version 0.11
+      - run: cargo install cargo-fuzz --version 0.11.4
       - name: Run fuzz smoke tests (30s per target)
         run: |
           cargo fuzz run fuzz_proof_record_decode -- -max_total_time=30

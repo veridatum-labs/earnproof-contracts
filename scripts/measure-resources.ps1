@@ -49,7 +49,8 @@ $contracts = @{
 
 # Build all contracts in release mode
 Write-Host "Building contracts in release mode..." -ForegroundColor Yellow
-cargo build --release --workspace --target wasm32-unknown-unknown
+rustup target add wasm32v1-none | Out-Null
+stellar contract build
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Build failed"
     exit 1
@@ -64,7 +65,8 @@ $results = @()
 
 foreach ($name in $contracts.Keys) {
     $config = $contracts[$name]
-    $wasm_path = "target/wasm32-unknown-unknown/release/$name.wasm"
+    $wasm_name = $name.Replace("-", "_")
+    $wasm_path = "target/wasm32v1-none/release/$wasm_name.wasm"
     
     if (-not (Test-Path $wasm_path)) {
         Write-Host "  ERROR: WASM file not found: $wasm_path" -ForegroundColor Red

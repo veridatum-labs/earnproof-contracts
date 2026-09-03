@@ -1,7 +1,5 @@
 #![no_std]
 
-extern crate alloc;
-
 use soroban_sdk::{contracterror, contracttype, Address, BytesN};
 
 pub mod storage_namespaces;

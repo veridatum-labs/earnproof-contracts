@@ -15,6 +15,9 @@ Default: 'testnet'
 .PARAMETER NoWasmBuild
 If set, skips contract building (useful for regenerating types only)
 
+.PARAMETER SkipProvenance
+If set, skips writing provenance.json (useful for deterministic CI stale checks)
+
 .PARAMETER Verbose
 Enable detailed logging
 
@@ -43,6 +46,8 @@ param(
 
   [switch]$NoWasmBuild,
 
+  [switch]$SkipProvenance,
+
   [switch]$Verbose
 )
 
@@ -52,10 +57,11 @@ $ErrorActionPreference = 'Stop'
 # Configuration
 # ────────────────────────────────────────────────────────────
 
-$STELLAR_CLI_VERSION = '21.0.0' # PIN — change requires PR review
+$STELLAR_CLI_VERSION = '27.1.0' # PIN — change requires PR review
 $CONTRACTS_DIR = 'contracts'
 $ARTIFACTS_DIR = 'artifacts/bindings'
 $ROOT_DIR = (Get-Location).Path
+$WASM_TARGET = 'wasm32v1-none'
 
 # ────────────────────────────────────────────────────────────
 # Functions
@@ -85,23 +91,32 @@ function Invoke-Command-Checked {
 
   Write-Status $Description
 
+  $previousErrorActionPreference = $ErrorActionPreference
   try {
+    # Windows PowerShell can surface redirected native stderr as an ErrorRecord
+    # even when the process exits successfully. Check $LASTEXITCODE directly.
+    $ErrorActionPreference = 'Continue'
     if ($CaptureOutput) {
       $output = & $ScriptBlock 2>&1
-      if ($LASTEXITCODE -ne 0) {
+      $exitCode = $LASTEXITCODE
+      $ErrorActionPreference = $previousErrorActionPreference
+      if ($exitCode -ne 0) {
         Write-Host ($output | Out-String) -ForegroundColor Red
-        throw "Command failed with exit code $LASTEXITCODE"
+        throw "Command failed with exit code $exitCode"
       }
       return $output
     }
     else {
       & $ScriptBlock 2>&1
-      if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE"
+      $exitCode = $LASTEXITCODE
+      $ErrorActionPreference = $previousErrorActionPreference
+      if ($exitCode -ne 0) {
+        throw "Command failed with exit code $exitCode"
       }
     }
   }
   catch {
+    $ErrorActionPreference = $previousErrorActionPreference
     Write-Error-Custom "Failed: $Description"
     throw $_
   }
@@ -125,7 +140,17 @@ function Get-GitCommit {
 }
 
 function Get-TimeStampUtc {
-  return (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
+  return (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+}
+
+function Set-Utf8NoBomContent {
+  param(
+    [string]$Path,
+    [string]$Value
+  )
+
+  $encoding = [System.Text.UTF8Encoding]::new($false)
+  [System.IO.File]::WriteAllText($Path, $Value, $encoding)
 }
 
 # ────────────────────────────────────────────────────────────
@@ -155,12 +180,17 @@ if (-not (Test-Path $ARTIFACTS_DIR)) {
 if (-not $NoWasmBuild) {
   Write-Status "Building contracts to WASM"
 
-  # Install wasm32v1-none target if needed
-  Write-Host "Checking wasm32-unknown-unknown target..."
-  rustup target add wasm32-unknown-unknown 2>&1 | Out-Null
+  if (-not (Get-Command stellar -ErrorAction SilentlyContinue)) {
+    throw "Stellar CLI not found. Install with: cargo install --locked stellar-cli --version $STELLAR_CLI_VERSION"
+  }
+
+  Write-Host "Checking $WASM_TARGET target..."
+  Invoke-Command-Checked "Installing $WASM_TARGET target" {
+    rustup target add $WASM_TARGET
+  }
 
   Invoke-Command-Checked "Building release WASM" {
-    cargo build --target wasm32-unknown-unknown --release 2>&1
+    stellar contract build
   }
 
   Write-Success "WASM build complete"
@@ -186,7 +216,7 @@ foreach ($dir in $contractDirs) {
   $contractName = $dir.Name
   $contractNames += $contractName
 
-  $wasmPath = "target/wasm32-unknown-unknown/release/$($contractName.Replace('-', '_')).wasm"
+  $wasmPath = "target/$WASM_TARGET/release/$($contractName.Replace('-', '_')).wasm"
 
   if (Test-Path $wasmPath) {
     $hash = Get-FileHash-Sha256 $wasmPath
@@ -206,7 +236,7 @@ Write-Status "Extracting contract specifications"
 
 foreach ($contractName in $contractNames) {
   $wasmName = $contractName.Replace('-', '_')
-  $wasmPath = "target/wasm32-unknown-unknown/release/$wasmName.wasm"
+  $wasmPath = "target/$WASM_TARGET/release/$wasmName.wasm"
 
   if (Test-Path $wasmPath) {
     $specPath = "$ARTIFACTS_DIR/$contractName-spec.json"
@@ -218,13 +248,13 @@ foreach ($contractName in $contractNames) {
     # Once Stellar CLI v21+ is available in the environment
 
     # Write placeholder spec (actual extraction requires stellar-cli setup)
-    $spec = @{
+    $spec = [ordered]@{
       contract = $contractName
       wasmHash = $wasmHashes[$contractName]
       path = $wasmPath
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Compress
 
-    Set-Content -Path $specPath -Value $spec -Encoding UTF8
+    Set-Utf8NoBomContent -Path $specPath -Value $spec
     Write-Host "    → $specPath" -ForegroundColor Green
   }
 }
@@ -233,22 +263,27 @@ foreach ($contractName in $contractNames) {
 # Write Provenance File
 # ────────────────────────────────────────────────────────────
 
-Write-Status "Writing provenance file"
+if ($SkipProvenance) {
+  Write-Host "Skipping provenance file" -ForegroundColor Yellow
+}
+else {
+  Write-Status "Writing provenance file"
 
-$provenance = @{
-  sourceCommit = $sourceCommit
-  generatedAt = $generatedAt
-  stellarCliVersion = $STELLAR_CLI_VERSION
-  network = $Network
-  contracts = $contractNames
-  wasmHashes = $wasmHashes
-} | ConvertTo-Json -Depth 2
+  $provenance = [ordered]@{
+    sourceCommit = $sourceCommit
+    generatedAt = $generatedAt
+    stellarCliVersion = $STELLAR_CLI_VERSION
+    network = $Network
+    contracts = $contractNames
+    wasmHashes = $wasmHashes
+  } | ConvertTo-Json -Depth 2 -Compress
 
-$provenancePath = "$ARTIFACTS_DIR/provenance.json"
-Set-Content -Path $provenancePath -Value $provenance -Encoding UTF8
+  $provenancePath = "$ARTIFACTS_DIR/provenance.json"
+  Set-Utf8NoBomContent -Path $provenancePath -Value $provenance
 
-Write-Success "Provenance: $provenancePath"
-Write-Host ($provenance | Out-String) -ForegroundColor DarkGray
+  Write-Success "Provenance: $provenancePath"
+  Write-Host ($provenance | Out-String) -ForegroundColor DarkGray
+}
 
 # ────────────────────────────────────────────────────────────
 # Summary
@@ -260,7 +295,13 @@ Write-Host ""
 Write-Host "Generated files:" -ForegroundColor Cyan
 Write-Host "  • artifacts/bindings/types.ts"
 Write-Host "  • artifacts/bindings/client.ts"
-Write-Host "  • artifacts/bindings/provenance.json"
+Write-Host "  • artifacts/bindings/*-spec.json"
+if ($SkipProvenance) {
+  Write-Host "  • artifacts/bindings/provenance.json (unchanged)"
+}
+else {
+  Write-Host "  • artifacts/bindings/provenance.json"
+}
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Review generated TypeScript files"

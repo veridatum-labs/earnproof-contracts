@@ -12,6 +12,7 @@ on:
       - "contracts/**/*.rs"
       - "artifacts/bindings/**"
       - "scripts/generate-bindings.ps1"
+      - ".github/workflows/bindings.yml"
 
 jobs:
   check-bindings:
@@ -23,26 +24,30 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --version 27.1.0
 
       - name: Regenerate bindings
         shell: pwsh
         run: |
-          # Install PowerShell if needed (usually pre-installed on ubuntu-latest)
-          pwsh -Command {
-            Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
-            & ./scripts/generate-bindings.ps1 -Network testnet
-          }
+          ./scripts/generate-bindings.ps1 -Network testnet -SkipProvenance
 
       - name: Check for stale bindings
         run: |
-          if ! git diff --exit-code artifacts/bindings/; then
+          if ! git diff --exit-code -- artifacts/bindings/ ':!artifacts/bindings/provenance.json'; then
             echo "❌ Bindings are stale!"
             echo "Contract interfaces changed but bindings were not regenerated."
             echo ""
             echo "Run ./scripts/generate-bindings.ps1 and commit the changes."
             echo ""
-            git diff artifacts/bindings/
+            git diff -- artifacts/bindings/ ':!artifacts/bindings/provenance.json'
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain -- artifacts/bindings/ ':!artifacts/bindings/provenance.json')" ]; then
+            echo "Binding generation produced untracked artifacts."
+            git status --short -- artifacts/bindings/ ':!artifacts/bindings/provenance.json'
             exit 1
           fi
           echo "✅ Bindings are up to date"

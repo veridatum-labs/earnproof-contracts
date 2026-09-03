@@ -538,7 +538,8 @@ Invoke-Test "release note containing a secret seed fails" {
   # Synthetic, seed-shaped value. Never a real key.
   $temp = New-MutatedRelease {
     param($t)
-    $t + "`n`nDeployer seed: SCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR`n"
+    $syntheticSeed = 'S' + ('C' * 55)
+    $t + "`n`nDeployer seed: $syntheticSeed`n"
   }
   try {
     Assert-ExitNonZero `
@@ -599,7 +600,8 @@ function New-MutatedManifest {
 Invoke-Test "manifest containing a secret seed fails" {
   $temp = New-MutatedManifest {
     param($t)
-    $t -replace '"source": "deployer"', '"source": "SBQNSHKUSA3EWL2WVMMGZJIA3WWZTPGSXVSCJHW6NM4PZ3O2GEOAV7DS"'
+    $syntheticSeed = 'S' + ('B' * 55)
+    $t -replace '"source": "deployer"', ('"source": "' + $syntheticSeed + '"')
   }
   try {
     Assert-ExitNonZero `

@@ -54,7 +54,7 @@ flowchart TD
 
 1. **Reference Immutability**: Cross-contract addresses (`protocol_config`, `issuer_registry`) are recorded during `contracts/proof-registry/src/lib.rs::initialize` in instance storage and cannot be altered at runtime.
 2. **Fail-Closed Execution**: If any dependency is uninitialized, missing, incompatible, paused, or returns false, proof registration aborts immediately (`contracts/proof-registry/src/lib.rs::register_proof`).
-3. **Atomic Rollback**: In accordance with Soroban invocation semantics, a failed cross-contract call rolls back all state changes, emits no events, and extends no TTLs (`tests/cross-contract/src/boundaries.rs::registration_rolls_back_when_the_pause_read_fails`, `tests/events/src/ghost.rs::a_rejected_call_changes_neither_events_nor_storage`).
+3. **Atomic Rollback**: In accordance with Soroban invocation semantics, a failed cross-contract call rolls back all state changes, emits no events, and extends no TTLs (`tests/cross-contract/src/boundaries.rs::a_rejected_pause_read_leaves_no_proof_record`, `tests/events/src/ghost.rs::a_rejected_call_changes_neither_events_nor_storage`).
 4. **Evaluation Priority**: Revocation dominates temporal expiration; a revoked proof is permanently invalid regardless of expiration timestamp (`tests/time/src/lib.rs::revocation_dominates_expiration`).
 
 ---

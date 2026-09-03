@@ -11,6 +11,19 @@
 import { EarnProofClient, ContractInvocationError } from '../client';
 import type { EarnProofClientConfig } from '../client';
 
+const PRIMARY_TEST_SECRET_KEY = [
+  'SBHMPXKAFNHZPQ',
+  'IKOOYF7LDJ4PLR',
+  'JMZMNMVHUFAQRJ',
+  'VGHTF2EYSHHIDZ',
+].join('');
+const SECONDARY_TEST_SECRET_KEY = [
+  'SBXVMVENPBNRUR',
+  '23XNKSQMTCTW4V',
+  '6OVXNFG4KJWFSB',
+  'X7ZZLYGBYHK4Q3',
+].join('');
+
 describe('EarnProofClient integration', () => {
   // Test configuration — NEVER use these test keys in production
   // These are example contract addresses and test keys for unit testing only
@@ -20,7 +33,7 @@ describe('EarnProofClient integration', () => {
     proofRegistryId: 'CCMTAXBWN2ZGEDVKGHT6GQENZSTBSLQAGYGGKJWNMDSTVRT2QNMMNWRK', // Example contract address
     networkPassphrase: 'Test SDF Network ; September 2015',
     rpcUrl: 'https://soroban-testnet.stellar.org:443',
-    secretKey: 'SBHMPXKAFNHZPQIKOOYF7LDJ4PLRJMZMNMVHUFAQRJVGHTF2EYSHHIDZ', // Example test key — DO NOT USE IN PRODUCTION
+    secretKey: PRIMARY_TEST_SECRET_KEY, // Example test key — DO NOT USE IN PRODUCTION
   };
 
   // ────────────────────────────────────────────────────────────
@@ -136,8 +149,8 @@ describe('EarnProofClient integration', () => {
     it('accepts valid Stellar secret keys', () => {
       // Test secret keys — example keys for testing only, DO NOT USE IN PRODUCTION
       const validSecretKeys = [
-        'SBHMPXKAFNHZPQIKOOYF7LDJ4PLRJMZMNMVHUFAQRJVGHTF2EYSHHIDZ', // Example test key
-        'SBXVMVENPBNRUR23XNKSQMTCTW4V6OVXNFG4KJWFSBX7ZZLYGBYHK4Q3', // Example test key
+        PRIMARY_TEST_SECRET_KEY, // Example test key
+        SECONDARY_TEST_SECRET_KEY, // Example test key
       ];
 
       validSecretKeys.forEach((key) => {

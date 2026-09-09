@@ -4,6 +4,7 @@ members = [
   "contracts/issuer-registry",
   "contracts/proof-registry",
   "packages/shared",
+  "tests/compatibility",
   "tests/event-fixtures",
   "tests/events",
   "tests/emergency",

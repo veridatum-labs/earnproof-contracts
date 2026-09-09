@@ -3,7 +3,22 @@ members = [
   "contracts/protocol-config",
   "contracts/issuer-registry",
   "contracts/proof-registry",
-  "packages/shared"
+  "packages/shared",
+  "tests/event-fixtures",
+  "tests/events",
+  "tests/emergency",
+  "tests/budgets",
+  "tests/authorization",
+  "tests/cross-contract",
+  "tests/property",
+  "tests/time",
+  "tests/encoding",
+  "tests/ttl",
+  "tests/storage-keys",
+  "tests/error-catalog",
+  "tests/ledger-snapshots",
+  "tests/address-validation",
+  "fuzz"
 ]
 resolver = "2"
 
@@ -15,6 +30,7 @@ repository = "https://github.com/veridatum-labs/earnproof-contracts"
 [workspace.dependencies]
 soroban-sdk = "27.0.0"
 earnproof-shared = { path = "packages/shared" }
+proptest = "1.4"
 
 [profile.release]
 overflow-checks = true

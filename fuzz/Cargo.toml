@@ -1,0 +1,58 @@
+[package]
+name = "earnproof-fuzz"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1.3", features = ["derive"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+earnproof-shared.workspace = true
+
+[dev-dependencies]
+proof-registry = { path = "../contracts/proof-registry" }
+issuer-registry = { path = "../contracts/issuer-registry" }
+protocol-config = { path = "../contracts/protocol-config" }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[[bin]]
+name = "fuzz_proof_record_decode"
+path = "fuzz_targets/fuzz_proof_record_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_issuer_record_decode"
+path = "fuzz_targets/fuzz_issuer_record_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_issuer_status_decode"
+path = "fuzz_targets/fuzz_issuer_status_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_proof_status_decode"
+path = "fuzz_targets/fuzz_proof_status_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_address_validation"
+path = "fuzz_targets/fuzz_address_validation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_entry_point_register_proof"
+path = "fuzz_targets/fuzz_entry_point_register_proof.rs"
+test = false
+doc = false

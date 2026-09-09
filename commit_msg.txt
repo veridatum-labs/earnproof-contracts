@@ -1,0 +1,11 @@
+Add TTL expiration and restoration boundary tests for Issue #88
+
+- Created tests/ttl/ with comprehensive boundary test suite
+- Implemented TtlTestHarness for deterministic ledger advancement  
+- 17 tests covering pre-expiry, at-expiry, post-expiry, restoration
+- Verifies fail-closed pattern across all 16 TTL-bearing entries
+- Added docs/storage-model.md with complete TTL reference
+- Added docs/TTL_TEST_SUMMARY.md with implementation findings
+- Verified: no TTL bugs; all boundary semantics correct
+
+Resolves: #88

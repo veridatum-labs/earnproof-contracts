@@ -1,0 +1,14 @@
+Add cross-contract failure atomicity tests for Issue #89
+
+- Implemented 25+ comprehensive atomicity test cases in tests/cross-contract/src/boundaries.rs
+- Tests cover all three cross-contract boundaries in proof registration:
+  * Boundary 1: protocol-config::is_paused()
+  * Boundary 2: protocol-config::is_schema_version_approved(u32)
+  * Boundary 3: issuer-registry::is_active_address(Address)
+- Test failure modes: explicit rejection, malformed responses, authorization demands, invalid addresses
+- Every failure case verifies: no proof record, no state changes, no events, rollback reaches dependencies
+- Created CROSS_CONTRACT_ATOMICITY_SUMMARY.md documenting findings and test coverage
+- Key finding: All cross-contract calls occur BEFORE storage writes, ensuring atomicity by design
+- No atomicity bugs discovered
+
+Resolves: #89

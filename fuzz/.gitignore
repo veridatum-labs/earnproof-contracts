@@ -1,0 +1,9 @@
+# Fuzzing artifacts
+target/
+corpus/
+artifacts/
+crash-*
+leak-*
+oom-*
+slow-*
+timeout-*

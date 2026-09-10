@@ -39,12 +39,16 @@ jobs:
           # Asserted here as well as in the smoke test. This is the property
           # that keeps throwaway keys and unreviewed artifacts off testnet, so
           # it is worth failing the build twice over.
-          $ErrorActionPreference = "Continue"
-
           foreach ($network in @("testnet", "futurenet", "mainnet", "public")) {
-            ./scripts/local-sandbox/run-sandbox.ps1 -Network $network 2>$null
+            $refused = $false
+            try {
+              ./scripts/local-sandbox/run-sandbox.ps1 -Network $network 2>$null
+            }
+            catch {
+              $refused = $true
+            }
 
-            if ($LASTEXITCODE -eq 0) {
+            if (-not $refused) {
               Write-Host "::error::the harness accepted -Network $network"
               exit 1
             }
@@ -79,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2

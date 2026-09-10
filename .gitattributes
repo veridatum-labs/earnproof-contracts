@@ -2,3 +2,5 @@
 # mutation self-test (scripts/mutation-test.ps1 -SelfTest) can apply them with
 # `git apply` regardless of the checkout's autocrlf setting.
 tests/mutation/seeds/*.patch -text
+
+.githooks/* text eol=lf

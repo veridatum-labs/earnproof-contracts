@@ -156,6 +156,28 @@ pub struct IssuerRecord {
     pub updated_at: u64,
 }
 
+/// A stored, versioned receipt proving that an in-place WASM upgrade completed
+/// only after the critical state invariants were re-validated.
+///
+/// Each contract writes one receipt under its own `DataKey::UpgradeReceipt(new_contract_version)`
+/// immediately before the version transition is finalized.  Its presence is
+/// evidence that the upgrade did not leave the contract with an invalid
+/// administrator, an invalid dependency reference, or a non-monotonic version.
+/// Because a failed validation panics and rolls the invocation back, a receipt
+/// can never be observed for a target that failed validation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeReceipt {
+    /// The WASM hash that was applied.
+    pub wasm_hash: BytesN<32>,
+    /// The contract version that was active before the upgrade.
+    pub old_contract_version: u32,
+    /// The contract version that the upgrade advanced to.
+    pub new_contract_version: u32,
+    /// The administrator that authorized the upgrade.
+    pub upgraded_by: Address,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofRecord {

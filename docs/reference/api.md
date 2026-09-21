@@ -52,6 +52,16 @@
 - Failure atomicity: Soroban invocation rollback
 - Source: `contracts/issuer-registry/src/lib.rs`
 
+## issuer-registry::get_upgrade_receipt
+
+- Parameters: `env: Env, new_contract_version: u32`
+- Result: `Option<UpgradeReceipt>`
+- Authorization: none
+- Storage effect: read-only
+- Event effect: none unless documented in lifecycle specification
+- Failure atomicity: Soroban invocation rollback
+- Source: `contracts/issuer-registry/src/lib.rs`
+
 ## issuer-registry::initialize
 
 - Parameters: `env: Env, admin: Address`
@@ -242,6 +252,16 @@
 - Failure atomicity: Soroban invocation rollback
 - Source: `contracts/proof-registry/src/lib.rs`
 
+## proof-registry::get_upgrade_receipt
+
+- Parameters: `env: Env, new_contract_version: u32`
+- Result: `Option<UpgradeReceipt>`
+- Authorization: none
+- Storage effect: read-only
+- Event effect: none unless documented in lifecycle specification
+- Failure atomicity: Soroban invocation rollback
+- Source: `contracts/proof-registry/src/lib.rs`
+
 ## proof-registry::initialize
 
 - Parameters: `env: Env, admin: Address, issuer_registry: Address, protocol_config: Address,`
@@ -377,6 +397,16 @@
 - Parameters: `env: Env`
 - Result: `u32`
 - Authorization: current admin
+- Storage effect: read-only
+- Event effect: none unless documented in lifecycle specification
+- Failure atomicity: Soroban invocation rollback
+- Source: `contracts/protocol-config/src/lib.rs`
+
+## protocol-config::get_upgrade_receipt
+
+- Parameters: `env: Env, new_contract_version: u32`
+- Result: `Option<UpgradeReceipt>`
+- Authorization: none
 - Storage effect: read-only
 - Event effect: none unless documented in lifecycle specification
 - Failure atomicity: Soroban invocation rollback

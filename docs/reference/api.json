@@ -57,6 +57,17 @@
       "storage_effect": "read-only"
     },
     {
+      "authorization": "none",
+      "contract": "issuer-registry",
+      "event_effect": "none unless documented in lifecycle specification",
+      "failure_atomicity": "Soroban invocation rollback",
+      "name": "get_upgrade_receipt",
+      "parameters": "env: Env, new_contract_version: u32",
+      "result": "Option<UpgradeReceipt>",
+      "source": "contracts/issuer-registry/src/lib.rs",
+      "storage_effect": "read-only"
+    },
+    {
       "authorization": "current admin",
       "contract": "issuer-registry",
       "event_effect": "none unless documented in lifecycle specification",
@@ -266,6 +277,17 @@
       "storage_effect": "read-only"
     },
     {
+      "authorization": "none",
+      "contract": "proof-registry",
+      "event_effect": "none unless documented in lifecycle specification",
+      "failure_atomicity": "Soroban invocation rollback",
+      "name": "get_upgrade_receipt",
+      "parameters": "env: Env, new_contract_version: u32",
+      "result": "Option<UpgradeReceipt>",
+      "source": "contracts/proof-registry/src/lib.rs",
+      "storage_effect": "read-only"
+    },
+    {
       "authorization": "current admin",
       "contract": "proof-registry",
       "event_effect": "none unless documented in lifecycle specification",
@@ -416,6 +438,17 @@
       "name": "get_contract_version",
       "parameters": "env: Env",
       "result": "u32",
+      "source": "contracts/protocol-config/src/lib.rs",
+      "storage_effect": "read-only"
+    },
+    {
+      "authorization": "none",
+      "contract": "protocol-config",
+      "event_effect": "none unless documented in lifecycle specification",
+      "failure_atomicity": "Soroban invocation rollback",
+      "name": "get_upgrade_receipt",
+      "parameters": "env: Env, new_contract_version: u32",
+      "result": "Option<UpgradeReceipt>",
       "source": "contracts/protocol-config/src/lib.rs",
       "storage_effect": "read-only"
     },

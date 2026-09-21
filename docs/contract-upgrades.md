@@ -90,6 +90,43 @@ tolerate the old encoding.**
 8. **Notify backend** of the new minimum version per the release note's
    `backend_compatibility` field, if it changed.
 
+## State-invariant validation and the upgrade receipt
+
+`upgrade_contract` does not treat a successful code swap as its own proof of
+success. Immediately before the WASM is applied it captures the critical
+invariants into an in-memory snapshot
+(`contracts/protocol-config/src/lib.rs::capture_upgrade_snapshot`,
+`contracts/issuer-registry/src/lib.rs::capture_upgrade_snapshot`,
+`contracts/proof-registry/src/lib.rs::capture_upgrade_snapshot`), and after the
+swap but **before** the version transition is finalized it re-validates them
+(`contracts/protocol-config/src/lib.rs::validate_post_upgrade`,
+`contracts/issuer-registry/src/lib.rs::validate_post_upgrade`,
+`contracts/proof-registry/src/lib.rs::validate_post_upgrade`):
+
+- The stored administrator address is still present and is a valid principal.
+- For `proof-registry`, the `issuer_registry` and `protocol_config` dependency
+  references are still present, still valid principal addresses, distinct from
+  one another, and distinct from the contract itself.
+- The new contract version is strictly greater than the version captured before
+  the swap, and `ContractVersion` was not altered mid-upgrade.
+
+If any check fails the contract panics, which rolls the whole invocation back —
+the code swap, the allowlist consumption, and every write after validation
+included. A target that would corrupt administrator, dependency, or version
+state therefore cannot leave a falsely completed upgrade record.
+
+On success each contract stores a versioned receipt under its own
+`UpgradeReceipt(new_contract_version)` key, retrievable with
+`get_upgrade_receipt(new_contract_version)`
+(`contracts/protocol-config/src/lib.rs::get_upgrade_receipt`,
+`contracts/issuer-registry/src/lib.rs::get_upgrade_receipt`,
+`contracts/proof-registry/src/lib.rs::get_upgrade_receipt`). The receipt records
+the applied WASM hash, the old and new contract versions, and the authorizing
+administrator. It is written only after validation succeeds, so its presence is
+positive evidence that the invariants above held. Querying it is read-only and
+extends the receipt's TTL; an absent receipt means no validated upgrade reached
+that version.
+
 ## Storage migration strategy
 
 There is no migration hook in the upgrade mechanism (see above) — a storage

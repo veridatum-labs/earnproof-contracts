@@ -25,7 +25,7 @@ The `protocol-config` contract manages system-wide administrative control, emerg
 | `deprecate_schema_version` | `Approved` | `Deprecated` | Current admin authenticates; `version > 0` | Sets `SchemaVersion(version) = false`, bumps TTL, increments `ConfigVersion` | `SchemaDeprecated` | Version 0: `ContractError::InvalidInput`; unauthorized caller |
 | `approve_upgrade` | Initialized | Allowlisted | Current admin authenticates; `new_version > ContractVersion` | Sets `AllowedWasm(wasm_hash) = new_version`, extends instance TTL | `UpgradeAllowlisted` | Version downgrade (`new_version <= ContractVersion`); unauthorized caller |
 | `revoke_upgrade` | Allowlisted | Absent | Current admin authenticates | Removes `AllowedWasm(wasm_hash)` | `UpgradeRevoked` | Unauthorized caller |
-| `upgrade_contract` | Allowlisted | Initialized (New WASM) | Current admin authenticates; `wasm_hash` in allowlist; `target_version > ContractVersion` | Consumes allowlist entry, updates contract WASM, sets `ContractVersion = new_version` | `ContractUpgraded` | Non-allowlisted WASM hash; replay of consumed hash; version downgrade |
+| `upgrade_contract` | Allowlisted | Initialized (New WASM) | Current admin authenticates; `wasm_hash` in allowlist; `target_version > ContractVersion`; post-upgrade invariants re-validated before the version transition is finalized | Consumes allowlist entry, updates contract WASM, re-validates administrator/pause/version invariants, sets `ContractVersion = new_version`, stores `UpgradeReceipt(new_version)` | `ContractUpgraded` | Non-allowlisted WASM hash; replay of consumed hash; version downgrade; post-upgrade invariant violation (rolls back atomically) |
 
 ---
 
@@ -37,6 +37,7 @@ The `protocol-config` contract manages system-wide administrative control, emerg
 4. **Permanent Invalidity of Version Zero**: Schema version 0 can never be approved, deprecated, or stored (`contracts/protocol-config/src/lib.rs::ensure_nonzero_version`).
 5. **Monotonic Contract Upgrades**: Contract version must strictly advance upon upgrade; downgrade versions cannot be approved or installed (`contracts/protocol-config/src/lib.rs::approve_upgrade`, `contracts/protocol-config/src/lib.rs::upgrade_contract`).
 6. **Replay-Protected Upgrades**: Upgrade allowlist entries are consumed atomically prior to applying bytecode changes, preventing replay of previously approved hashes.
+7. **Validated Upgrade State**: An upgrade finalizes its version transition only after re-reading the critical invariants captured before the code swap. If the administrator address becomes invalid, the pause state or config version drifts, or the new version is not strictly greater than the pre-upgrade version, the invocation panics and rolls back (`contracts/protocol-config/src/lib.rs::validate_post_upgrade`). A validated upgrade stores a queryable versioned receipt (`contracts/protocol-config/src/lib.rs::get_upgrade_receipt`); an invalid target cannot leave a falsely completed record.
 
 ---
 

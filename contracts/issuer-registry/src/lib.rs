@@ -1,7 +1,7 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, IssuerError, IssuerRecord, IssuerStatus, TTL_EXTEND_TO_LEDGERS,
+    ContractError, IssuerError, IssuerRecord, IssuerStatus, UpgradeReceipt, TTL_EXTEND_TO_LEDGERS,
     TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env};
@@ -18,6 +18,19 @@ enum DataKey {
     AllowedWasm(BytesN<32>),
     /// Monotonically-increasing contract version.  Prevents downgrade.
     ContractVersion,
+    /// Versioned upgrade receipt, keyed by the contract version the upgrade
+    /// advanced to.  Written only after post-upgrade invariant validation
+    /// succeeds, so a failed upgrade leaves no receipt behind.
+    UpgradeReceipt(u32),
+}
+
+/// In-memory snapshot of the critical registry invariants captured immediately
+/// before a WASM upgrade is applied.  Never persisted; it exists so
+/// `validate_post_upgrade` can prove the code swap left administrator and
+/// version state intact before the version transition is finalized.
+struct UpgradeSnapshot {
+    admin: Address,
+    contract_version: u32,
 }
 
 // ── upgrade events ────────────────────────────────────────────────────────────
@@ -369,8 +382,13 @@ impl IssuerRegistryContract {
     /// 2. `wasm_hash` is on the allowlist.
     /// 3. Target version is strictly greater than current (downgrade guard).
     ///
-    /// On success the allowlist entry is consumed and `ContractVersion` is
-    /// advanced.
+    /// On success the allowlist entry is consumed, `ContractVersion` is
+    /// advanced, and a versioned `UpgradeReceipt` is stored.
+    ///
+    /// Before the version transition is finalized the critical state
+    /// invariants are re-validated against a snapshot captured before the code
+    /// swap.  If validation fails the whole invocation panics and rolls back,
+    /// so an invalid target cannot leave a falsely completed upgrade record.
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
@@ -386,6 +404,9 @@ impl IssuerRegistryContract {
             panic!("upgrade would not advance contract version");
         }
 
+        // Snapshot the critical invariants before anything is mutated.
+        let snapshot = Self::capture_upgrade_snapshot(&env, &admin);
+
         // Consume allowlist entry before applying to prevent replay.
         env.storage()
             .instance()
@@ -395,10 +416,31 @@ impl IssuerRegistryContract {
         env.deployer()
             .update_current_contract_wasm(wasm_hash.clone());
 
+        // Bounded post-upgrade validation, before the version transition is
+        // finalized.  A failure panics and rolls back every write above.
+        Self::validate_post_upgrade(&env, &snapshot, new_version);
+
         env.storage()
             .instance()
             .set(&DataKey::ContractVersion, &new_version);
         Self::extend_instance_ttl(env.clone());
+
+        // Store the versioned receipt only after validation succeeded.
+        let receipt_key = DataKey::UpgradeReceipt(new_version);
+        env.storage().persistent().set(
+            &receipt_key,
+            &UpgradeReceipt {
+                wasm_hash: wasm_hash.clone(),
+                old_contract_version: old_version,
+                new_contract_version: new_version,
+                upgraded_by: admin.clone(),
+            },
+        );
+        env.storage().persistent().extend_ttl(
+            &receipt_key,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
 
         ContractUpgraded {
             new_wasm_hash: wasm_hash,
@@ -409,7 +451,50 @@ impl IssuerRegistryContract {
         .publish(&env);
     }
 
+    /// Returns the versioned upgrade receipt for `new_contract_version`, if an
+    /// upgrade to that version completed successfully.
+    pub fn get_upgrade_receipt(env: Env, new_contract_version: u32) -> Option<UpgradeReceipt> {
+        let key = DataKey::UpgradeReceipt(new_contract_version);
+        let receipt = env.storage().persistent().get(&key);
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(
+                &key,
+                TTL_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
+        }
+        receipt
+    }
+
     // ── private helpers ───────────────────────────────────────────────────────
+
+    /// Captures the critical invariants that must survive an upgrade.
+    fn capture_upgrade_snapshot(env: &Env, admin: &Address) -> UpgradeSnapshot {
+        UpgradeSnapshot {
+            admin: admin.clone(),
+            contract_version: Self::get_contract_version(env.clone()),
+        }
+    }
+
+    /// Bounded post-upgrade validation.  Re-reads every critical invariant and
+    /// panics if the upgrade left any of them broken or non-monotonic.  Because
+    /// this runs before the version transition is finalized and a panic rolls
+    /// the invocation back, no receipt or version change can survive a failure.
+    fn validate_post_upgrade(env: &Env, snapshot: &UpgradeSnapshot, new_version: u32) {
+        let admin =
+            Self::get_admin(env.clone()).expect("post-upgrade validation: administrator missing");
+        if admin != snapshot.admin || !earnproof_shared::is_valid_principal_address(&admin) {
+            panic!("post-upgrade validation: administrator address invalid");
+        }
+
+        if Self::get_contract_version(env.clone()) != snapshot.contract_version {
+            panic!("post-upgrade validation: contract version changed mid-upgrade");
+        }
+
+        if new_version <= snapshot.contract_version {
+            panic!("post-upgrade validation: version transition is not monotonic");
+        }
+    }
 
     fn require_valid_admin(address: &Address) -> Result<(), ContractError> {
         if !earnproof_shared::is_valid_principal_address(address) {
@@ -754,6 +839,115 @@ mod test {
 
         // Attempting to allowlist version 1 after reaching version 2.
         client.approve_upgrade(&old_hash, &1);
+    }
+
+    // ── upgrade state-invariant tests ─────────────────────────────────────────
+
+    /// A successful upgrade stores a versioned receipt with the applied hash,
+    /// the old and new versions, and the authorizing admin.
+    #[test]
+    fn upgrade_stores_versioned_receipt() {
+        let (env, client, admin) = setup();
+        let hash = bytes(&env, 0x11);
+
+        client.approve_upgrade(&hash, &2);
+        client.upgrade_contract(&hash);
+
+        let receipt = client
+            .get_upgrade_receipt(&2)
+            .expect("receipt for the completed version must exist");
+        assert_eq!(receipt.wasm_hash, hash);
+        assert_eq!(receipt.old_contract_version, 1);
+        assert_eq!(receipt.new_contract_version, 2);
+        assert_eq!(receipt.upgraded_by, admin);
+        assert_eq!(client.get_contract_version(), 2);
+
+        assert!(client.get_upgrade_receipt(&1).is_none());
+        assert!(client.get_upgrade_receipt(&3).is_none());
+    }
+
+    /// Each completed upgrade writes exactly one receipt, keyed by the version
+    /// it advanced to; repeated execution cannot duplicate or overwrite one.
+    #[test]
+    fn repeated_upgrades_write_one_receipt_per_version() {
+        let (env, client, _admin) = setup();
+
+        let hash_v2 = bytes(&env, 0x21);
+        client.approve_upgrade(&hash_v2, &2);
+        client.upgrade_contract(&hash_v2);
+
+        let hash_v3 = bytes(&env, 0x22);
+        client.approve_upgrade(&hash_v3, &3);
+        client.upgrade_contract(&hash_v3);
+
+        assert_eq!(client.get_upgrade_receipt(&2).unwrap().wasm_hash, hash_v2);
+        assert_eq!(client.get_upgrade_receipt(&3).unwrap().wasm_hash, hash_v3);
+        assert_eq!(client.get_contract_version(), 3);
+
+        let replay = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.upgrade_contract(&hash_v2);
+        }));
+        assert!(replay.is_err());
+        assert_eq!(client.get_upgrade_receipt(&2).unwrap().wasm_hash, hash_v2);
+    }
+
+    /// A target that would leave the administrator address invalid must not
+    /// produce a receipt or advance the version.
+    #[test]
+    fn corrupt_admin_target_leaves_no_upgrade_record() {
+        let (env, client, _admin) = setup();
+        let hash = bytes(&env, 0x31);
+        client.approve_upgrade(&hash, &2);
+
+        let zero = Address::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        );
+        env.as_contract(&client.address, || {
+            env.storage().instance().set(&DataKey::Admin, &zero);
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.upgrade_contract(&hash);
+        }));
+        assert!(result.is_err(), "corrupt admin must block the upgrade");
+
+        assert_eq!(client.get_contract_version(), 1);
+        assert!(client.get_upgrade_receipt(&2).is_none());
+        assert!(client.is_upgrade_allowed(&hash));
+    }
+
+    /// A failed upgrade must not disturb the receipt already stored for an
+    /// earlier successful upgrade.
+    #[test]
+    fn failed_upgrade_preserves_existing_receipt() {
+        let (env, client, _admin) = setup();
+
+        let hash_v2 = bytes(&env, 0x41);
+        client.approve_upgrade(&hash_v2, &2);
+        client.upgrade_contract(&hash_v2);
+
+        let hash_v3 = bytes(&env, 0x42);
+        client.approve_upgrade(&hash_v3, &3);
+
+        let zero = Address::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        );
+        env.as_contract(&client.address, || {
+            env.storage().instance().set(&DataKey::Admin, &zero);
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.upgrade_contract(&hash_v3);
+        }));
+        assert!(result.is_err());
+
+        assert_eq!(client.get_contract_version(), 2);
+        assert!(client.get_upgrade_receipt(&3).is_none());
+        let prior = client.get_upgrade_receipt(&2).unwrap();
+        assert_eq!(prior.wasm_hash, hash_v2);
+        assert_eq!(prior.new_contract_version, 2);
     }
 
     // -----------------------------------------------------------------------

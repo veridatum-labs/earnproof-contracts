@@ -34,7 +34,7 @@ stateDiagram-v2
 | `is_valid_proof` | Any | Query Only | None (Public view function) | None | None | Returns `false` for absent, revoked, or expired proofs; returns `true` strictly when `status == Active && now <= expires_at` |
 | `approve_upgrade` | Initialized | Allowlisted | Current admin authenticates; `new_version > ContractVersion` | Sets `AllowedWasm(wasm_hash) = new_version`, extends instance TTL | `UpgradeAllowlisted` | Version downgrade (`new_version <= ContractVersion`); unauthorized caller |
 | `revoke_upgrade` | Allowlisted | Absent | Current admin authenticates | Removes `AllowedWasm(wasm_hash)` | `UpgradeRevoked` | Unauthorized caller |
-| `upgrade_contract` | Allowlisted | Initialized (New WASM) | Current admin authenticates; `wasm_hash` in allowlist; `target_version > ContractVersion` | Consumes allowlist entry, updates contract WASM, sets `ContractVersion = new_version` | `ContractUpgraded` | Non-allowlisted WASM hash; replay of consumed hash; version downgrade |
+| `upgrade_contract` | Allowlisted | Initialized (New WASM) | Current admin authenticates; `wasm_hash` in allowlist; `target_version > ContractVersion`; post-upgrade invariants re-validated before the version transition is finalized | Consumes allowlist entry, updates contract WASM, re-validates administrator/dependency/version invariants, sets `ContractVersion = new_version`, stores `UpgradeReceipt(new_version)` | `ContractUpgraded` | Non-allowlisted WASM hash; replay of consumed hash; version downgrade; post-upgrade invariant violation (rolls back atomically) |
 
 ---
 
@@ -45,6 +45,7 @@ stateDiagram-v2
 3. **Revocation Dominance**: Revocation is permanent and overrides expiration. A revoked proof evaluates to `is_valid_proof == false` indefinitely, including when `now < expires_at` (`tests/time/src/lib.rs::revocation_dominates_expiration`).
 4. **Multi-Authority Revocation**: Both the issuing institution and the contract administrator hold independent revocation authority; neither can revoke an already revoked proof (`contracts/proof-registry/src/lib.rs::set_revoked`).
 5. **Cross-Contract Fail-Closed Atomicity**: Registration verifies `protocol-config` (unpaused and schema approved) and `issuer-registry` (issuer active). Failure of any dependency aborts the invocation, committing no state changes and extending no TTLs (`tests/cross-contract/src/boundaries.rs::a_rejected_pause_read_leaves_no_proof_record`).
+6. **Validated Upgrade State**: An upgrade finalizes its version transition only after re-reading the critical invariants captured before the code swap (`contracts/proof-registry/src/lib.rs::validate_post_upgrade`): the administrator address must remain valid, and the `issuer_registry`/`protocol_config` references must remain present, valid, distinct from one another, and distinct from this contract. Any violation panics and rolls back. A validated upgrade stores a queryable versioned receipt (`contracts/proof-registry/src/lib.rs::get_upgrade_receipt`); an invalid target cannot leave a falsely completed record.
 
 ---
 

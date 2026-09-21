@@ -37,7 +37,7 @@ stateDiagram-v2
 | `rotate_issuer_address` | `Active` / `Suspended` | Same State | Current admin authenticates; issuer exists; `status != Revoked`; `new_address` absent | Removes old `AddressIssuer(old)`, writes `AddressIssuer(new)`, updates `issuer_address` and `updated_at`; extends TTL | `IssuerAddressRotated` | Address already in use: `IssuerAlreadyExists`; revoked issuer: `IssuerNotFound`; unauthorized caller |
 | `approve_upgrade` | Initialized | Allowlisted | Current admin authenticates; `new_version > ContractVersion` | Sets `AllowedWasm(wasm_hash) = new_version`, extends instance TTL | `UpgradeAllowlisted` | Version downgrade (`new_version <= ContractVersion`); unauthorized caller |
 | `revoke_upgrade` | Allowlisted | Absent | Current admin authenticates | Removes `AllowedWasm(wasm_hash)` | `UpgradeRevoked` | Unauthorized caller |
-| `upgrade_contract` | Allowlisted | Initialized (New WASM) | Current admin authenticates; `wasm_hash` in allowlist; `target_version > ContractVersion` | Consumes allowlist entry, updates contract WASM, sets `ContractVersion = new_version` | `ContractUpgraded` | Non-allowlisted WASM hash; replay of consumed hash; version downgrade |
+| `upgrade_contract` | Allowlisted | Initialized (New WASM) | Current admin authenticates; `wasm_hash` in allowlist; `target_version > ContractVersion`; post-upgrade invariants re-validated before the version transition is finalized | Consumes allowlist entry, updates contract WASM, re-validates administrator/version invariants, sets `ContractVersion = new_version`, stores `UpgradeReceipt(new_version)` | `ContractUpgraded` | Non-allowlisted WASM hash; replay of consumed hash; version downgrade; post-upgrade invariant violation (rolls back atomically) |
 
 ---
 
@@ -47,6 +47,7 @@ stateDiagram-v2
 2. **Reverse Index Bijectivity**: Every active and suspended issuer address maps to exactly one issuer record. No two issuers can share an address, and an address cannot be reused after rotation while allocated.
 3. **Admin Exclusivity**: Only the authorized administrator can create, modify, suspend, reactivate, revoke, or rotate issuers (`contracts/issuer-registry/src/lib.rs::require_auth`). Issuer signatures cannot modify or revoke issuer records.
 4. **State Preservation Across Upgrades**: Contract state (issuers, reverse indices, admin) is preserved intact across WASM bytecode upgrades.
+5. **Validated Upgrade State**: An upgrade finalizes its version transition only after re-reading the critical invariants captured before the code swap. If the administrator address becomes invalid or the new version is not strictly greater than the pre-upgrade version, the invocation panics and rolls back (`contracts/issuer-registry/src/lib.rs::validate_post_upgrade`). A validated upgrade stores a queryable versioned receipt (`contracts/issuer-registry/src/lib.rs::get_upgrade_receipt`); an invalid target cannot leave a falsely completed record.
 
 ---
 

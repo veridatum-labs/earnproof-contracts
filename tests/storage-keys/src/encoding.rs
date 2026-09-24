@@ -83,7 +83,9 @@ fn reconstructed_keys_match_the_keys_the_contracts_write() {
             encoded(env, contract_version_key(env)),
             encoded(env, instance_live_until_key(env)),
             encoded(env, issuer_registry_key(env)),
+            encoded(env, issuer_registry_version_key(env)),
             encoded(env, protocol_config_key(env)),
+            encoded(env, protocol_config_version_key(env)),
         ]),
         "proof-registry instance keys"
     );

@@ -114,6 +114,8 @@ fn per_record_namespaces_hold_one_entry_per_record() {
         4
     );
 
+    // Two schema versions, one approved and one deprecated. Each records both
+    // SchemaVersion (bool) and SchemaRecord (metadata, timestamps).
     // Two schema versions plus one TTL tracker each. Deprecation keeps the key
     // so that "never seen" stays distinguishable from "withdrawn".
     assert_eq!(

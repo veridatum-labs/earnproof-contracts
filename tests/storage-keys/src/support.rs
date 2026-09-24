@@ -65,6 +65,16 @@ pub fn schema_version_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaVersion"), version)
 }
 
+pub fn schema_record_key(env: &Env, version: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "SchemaRecord"), version)
+}
+
+pub fn protocol_config_version_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "ProtocolConfigVersion"),)
+}
+
+pub fn issuer_registry_version_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "IssuerRegistryVersion"),)
 pub fn schema_ttl_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaTtl"), version)
 }

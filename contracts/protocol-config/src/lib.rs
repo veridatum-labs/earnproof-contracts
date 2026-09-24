@@ -1,6 +1,7 @@
 #![no_std]
 
 use earnproof_shared::{
+    ContractError, SchemaRecord, UpgradeReceipt, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
     ApprovalQuery, ApprovalStatus, ContractError, UpgradeApproval, UpgradeApprovalMetadata,
     UPGRADE_APPROVAL_EXPIRY_LEDGERS, UPGRADE_TIMELOCK_LEDGERS, TTL_EXTEND_TO_LEDGERS,
     TTL_THRESHOLD_LEDGERS,
@@ -20,6 +21,7 @@ enum DataKey {
     LatestPause,
     ConfigVersion,
     SchemaVersion(u32),
+    SchemaRecord(u32),
     SchemaTtl(u32),
     InstanceLiveUntil,
     /// Allowlist entry: maps a WASM hash to the target contract version it
@@ -29,6 +31,7 @@ enum DataKey {
     /// Monotonically-increasing contract version stored in instance storage.
     /// Prevents installing an older (or equal) version over a newer one.
     ContractVersion,
+    LatestUpgradeReceipt,
     /// Single active approval slot in instance storage.
     /// Used for timelock/expiry enforcement at execution time.
     UpgradeApproval,
@@ -79,6 +82,13 @@ pub struct SchemaApproved {
 #[contractevent]
 pub struct SchemaDeprecated {
     pub version: u32,
+}
+
+#[contractevent]
+pub struct SchemaMetadataSet {
+    pub version: u32,
+    pub metadata_hash: BytesN<32>,
+    pub activated_at: u64,
 }
 
 // ── upgrade events ───────────────────────────────────────────────────────────
@@ -227,6 +237,12 @@ impl ProtocolConfigContract {
         Ok(())
     }
 
+    pub fn approve_schema_with_metadata(
+        env: Env,
+        version: u32,
+        metadata_hash: BytesN<32>,
+        activation_timestamp: u64,
+    ) -> Result<(), ContractError> {
     /// Returns the active incident, or `None` while the protocol is unpaused.
     pub fn get_current_pause(env: Env) -> Option<PauseMetadata> {
         env.storage().instance().get(&DataKey::CurrentPause)
@@ -273,13 +289,55 @@ impl ProtocolConfigContract {
         let admin = Self::get_admin(env.clone())?;
         Self::require_auth(&admin);
         Self::ensure_nonzero_version(version)?;
+
+        let zero = BytesN::from_array(&env, &[0u8; 32]);
+        if metadata_hash == zero {
+            return Err(ContractError::InvalidInput);
+        }
+
+        let now = env.ledger().timestamp();
+        let activated_at = if activation_timestamp == 0 {
+            now
+        } else {
+            activation_timestamp
+        };
+
+        let record_key = DataKey::SchemaRecord(version);
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, SchemaRecord>(&record_key)
+        {
+            if existing.metadata_hash != metadata_hash {
+                return Err(ContractError::AlreadyExists);
+            }
+        }
+
+        let record = SchemaRecord {
+            version,
+            metadata_hash: metadata_hash.clone(),
+            is_approved: true,
+            activated_at,
+            deprecated_at: 0,
+        };
+
+        env.storage().persistent().set(&record_key, &record);
         env.storage()
             .persistent()
             .set(&DataKey::SchemaVersion(version), &true);
+
         Self::extend_schema_ttl(env.clone(), version);
         Self::bump_config_version(env.clone());
+
         SchemaApproved { version }.publish(&env);
+
         Ok(())
+    }
+
+    pub fn approve_schema_version(env: Env, version: u32) -> Result<(), ContractError> {
+        let default_hash = BytesN::from_array(&env, &[1u8; 32]);
+        let now = env.ledger().timestamp();
+        Self::approve_schema_with_metadata(env, version, default_hash, now)
     }
 
     pub fn deprecate_schema_version(env: Env, version: u32) -> Result<(), ContractError> {
@@ -287,6 +345,36 @@ impl ProtocolConfigContract {
         let admin = Self::get_admin(env.clone())?;
         Self::require_auth(&admin);
         Self::ensure_nonzero_version(version)?;
+
+        let now = env.ledger().timestamp();
+        let record_key = DataKey::SchemaRecord(version);
+        let mut record = if let Some(rec) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, SchemaRecord>(&record_key)
+        {
+            rec
+        } else if Self::is_schema_version_approved(env.clone(), version) {
+            SchemaRecord {
+                version,
+                metadata_hash: BytesN::from_array(&env, &[1u8; 32]),
+                is_approved: true,
+                activated_at: now,
+                deprecated_at: 0,
+            }
+        } else {
+            return Err(ContractError::InvalidState);
+        };
+
+        let deprecation_time = now;
+        if record.activated_at > 0 && deprecation_time < record.activated_at {
+            return Err(ContractError::InvalidState);
+        }
+
+        record.is_approved = false;
+        record.deprecated_at = deprecation_time;
+
+        env.storage().persistent().set(&record_key, &record);
         env.storage()
             .persistent()
             .set(&DataKey::SchemaVersion(version), &false);
@@ -296,11 +384,67 @@ impl ProtocolConfigContract {
         Ok(())
     }
 
-    pub fn is_schema_version_approved(env: Env, version: u32) -> bool {
+    pub fn get_schema_metadata_hash(env: Env, version: u32) -> Option<BytesN<32>> {
+        if version == 0 {
+            return None;
+        }
+        let record_key = DataKey::SchemaRecord(version);
+        if let Some(record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, SchemaRecord>(&record_key)
+        {
+            Some(record.metadata_hash)
+        } else if Self::is_schema_version_approved(env.clone(), version) {
+            Some(BytesN::from_array(&env, &[1u8; 32]))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_schema_record(env: Env, version: u32) -> Option<SchemaRecord> {
+        if version == 0 {
+            return None;
+        }
+        let record_key = DataKey::SchemaRecord(version);
+        if let Some(record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, SchemaRecord>(&record_key)
+        {
+            Some(record)
+        } else if Self::is_schema_version_approved_legacy(env.clone(), version) {
+            Some(SchemaRecord {
+                version,
+                metadata_hash: BytesN::from_array(&env, &[1u8; 32]),
+                is_approved: true,
+                activated_at: 0,
+                deprecated_at: 0,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn is_schema_active_at(env: Env, version: u32, timestamp: u64) -> bool {
         if version == 0 {
             return false;
         }
+        let record_key = DataKey::SchemaRecord(version);
+        if let Some(record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, SchemaRecord>(&record_key)
+        {
+            record.is_approved
+                && timestamp >= record.activated_at
+                && (record.deprecated_at == 0 || timestamp < record.deprecated_at)
+        } else {
+            Self::is_schema_version_approved_legacy(env, version)
+        }
+    }
 
+    fn is_schema_version_approved_legacy(env: Env, version: u32) -> bool {
         let key = DataKey::SchemaVersion(version);
         let approved = env.storage().persistent().get(&key).unwrap_or(false);
         if env.storage().persistent().has(&key) {
@@ -311,6 +455,10 @@ impl ProtocolConfigContract {
             );
         }
         approved
+    }
+
+    pub fn is_schema_version_approved(env: Env, version: u32) -> bool {
+        Self::is_schema_active_at(env.clone(), version, env.ledger().timestamp())
     }
 
     pub fn get_config_version(env: Env) -> u32 {
@@ -580,6 +728,9 @@ impl ProtocolConfigContract {
             .has(&DataKey::AllowedWasm(wasm_hash))
     }
 
+    /// Admin-only: apply an in-place WASM upgrade with state invariant assertions.
+    pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
+        let admin = Self::get_admin(env.clone()).expect("contract not initialized");
     /// Returns upgrade approval metadata for off-chain verification.
     ///
     /// # Read-only guarantee
@@ -646,6 +797,10 @@ impl ProtocolConfigContract {
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>, new_version: u32) -> Result<(), ContractError> {
         let admin = Self::get_admin(env.clone())?;
         Self::require_auth(&admin);
+        assert!(
+            earnproof_shared::is_valid_principal_address(&admin),
+            "invalid pre-upgrade admin address invariant"
+        );
 
         // Load approval — error if none exists
         let approval: UpgradeApproval = env
@@ -665,6 +820,12 @@ impl ProtocolConfigContract {
                 panic!("required storage migration is incomplete");
             }
         }
+
+        assert!(old_version >= 1, "invalid pre-upgrade version invariant");
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::AllowedWasm(wasm_hash.clone()));
 
         // Check expiry: too late — leave state unchanged, caller must re-approve
         if current_ledger >= approval.expires_at {
@@ -687,6 +848,12 @@ impl ProtocolConfigContract {
         env.deployer()
             .update_current_contract_wasm(wasm_hash.clone());
 
+        let post_admin = Self::get_admin(env.clone()).expect("post-upgrade admin check failed");
+        assert_eq!(
+            admin, post_admin,
+            "admin address invariant violated after upgrade"
+        );
+
         // Consume the active approval slot before version bump (prevents re-entrancy replay)
         env.storage()
             .instance()
@@ -697,6 +864,23 @@ impl ProtocolConfigContract {
             .instance()
             .set(&DataKey::ContractVersion, &new_version);
 
+        let now = env.ledger().timestamp();
+        let receipt = UpgradeReceipt {
+            wasm_hash: wasm_hash.clone(),
+            old_version,
+            new_version,
+            upgraded_at: now,
+            upgraded_by: admin.clone(),
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LatestUpgradeReceipt, &receipt);
+        Self::extend_instance_ttl(env.clone());
+
+        ContractUpgraded {
+            new_wasm_hash: wasm_hash.clone(),
+            old_contract_version: old_version,
         // Update persistent audit record to Executed
         if let Some(mut metadata) = env
             .storage()
@@ -719,7 +903,7 @@ impl ProtocolConfigContract {
             new_wasm_hash: wasm_hash,
             old_contract_version: current_version,
             new_contract_version: new_version,
-            upgraded_by: admin,
+            upgraded_by: admin.clone(),
         }
         .publish(&env);
         Ok(())
@@ -744,6 +928,10 @@ impl ProtocolConfigContract {
             .remove(&DataKey::UpgradeApproval);
 
         Ok(())
+    }
+
+    pub fn get_latest_upgrade_receipt(env: Env) -> Option<UpgradeReceipt> {
+        env.storage().instance().get(&DataKey::LatestUpgradeReceipt)
     }
 
     // ── private helpers ──────────────────────────────────────────────────────

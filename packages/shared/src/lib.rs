@@ -333,6 +333,24 @@ pub struct ProofRecord {
     pub revoked_at: u64,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SchemaRecord {
+    pub version: u32,
+    pub metadata_hash: BytesN<32>,
+    pub is_approved: bool,
+    pub activated_at: u64,
+    pub deprecated_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeReceipt {
+    pub wasm_hash: BytesN<32>,
+    pub old_version: u32,
+    pub new_version: u32,
+    pub upgraded_at: u64,
+    pub upgraded_by: Address,
 // ── Upgrade Approval Metadata ──────────────────────────────────────────────────
 // Metadata for an upgrade approval, exposed for off-chain verification.
 //

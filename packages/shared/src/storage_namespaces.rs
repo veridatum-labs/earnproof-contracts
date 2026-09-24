@@ -216,6 +216,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 26] = [
         owner: "deployment operator",
     },
     StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ProtocolConfigVersion",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
         contract: "protocol-config",
         namespace: "Admin",
         arity: 0,

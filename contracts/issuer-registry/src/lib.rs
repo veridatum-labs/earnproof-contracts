@@ -23,6 +23,7 @@ enum DataKey {
     MigrationStatus,
     /// Monotonically-increasing contract version.  Prevents downgrade.
     ContractVersion,
+    LatestUpgradeReceipt,
     /// Upgrade approval with temporal metadata (timelock and expiry).
     UpgradeApproval,
 }
@@ -548,6 +549,9 @@ impl IssuerRegistryContract {
             .has(&DataKey::AllowedWasm(wasm_hash))
     }
 
+    /// Admin-only: apply an in-place WASM upgrade with invariant assertions.
+    pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
+        let admin = Self::get_admin(env.clone()).expect("contract not initialized");
     /// Admin-only: apply an in-place WASM upgrade.
     ///
     /// # Requirements
@@ -566,6 +570,10 @@ impl IssuerRegistryContract {
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>, new_version: u32) -> Result<(), ContractError> {
         let admin = Self::get_admin(env.clone()).map_err(|_| ContractError::NotInitialized)?;
         Self::require_auth(&admin);
+        assert!(
+            earnproof_shared::is_valid_principal_address(&admin),
+            "invalid pre-upgrade admin address invariant"
+        );
 
         // Load approval — error if none exists
         let approval: UpgradeApproval = env
@@ -580,6 +588,8 @@ impl IssuerRegistryContract {
         if current_ledger < approval.earliest_execution {
             return Err(ContractError::UpgradeTimelockNotElapsed);
         }
+
+        assert!(old_version >= 1, "invalid pre-upgrade version invariant");
 
         // Check expiry: too late
         if current_ledger >= approval.expires_at {
@@ -619,9 +629,28 @@ impl IssuerRegistryContract {
         env.deployer()
             .update_current_contract_wasm(wasm_hash.clone());
 
+        let post_admin = Self::get_admin(env.clone()).expect("post-upgrade admin check failed");
+        assert_eq!(
+            admin, post_admin,
+            "admin address invariant violated after upgrade"
+        );
+
         env.storage()
             .instance()
             .set(&DataKey::ContractVersion, &new_version);
+
+        let now = env.ledger().timestamp();
+        let receipt = UpgradeReceipt {
+            wasm_hash: wasm_hash.clone(),
+            old_version,
+            new_version,
+            upgraded_at: now,
+            upgraded_by: admin.clone(),
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LatestUpgradeReceipt, &receipt);
         env.storage().instance().remove(&DataKey::MigrationStatus);
         Self::extend_instance_ttl(env.clone());
 
@@ -654,6 +683,10 @@ impl IssuerRegistryContract {
             .remove(&DataKey::UpgradeApproval);
 
         Ok(())
+    }
+
+    pub fn get_latest_upgrade_receipt(env: Env) -> Option<UpgradeReceipt> {
+        env.storage().instance().get(&DataKey::LatestUpgradeReceipt)
     }
 
     // ── private helpers ───────────────────────────────────────────────────────

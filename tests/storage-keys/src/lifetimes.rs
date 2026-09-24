@@ -113,11 +113,11 @@ fn per_record_namespaces_hold_one_entry_per_record() {
         2
     );
 
-    // Two schema versions, one approved and one deprecated. Deprecation keeps
-    // the key so that "never seen" stays distinguishable from "withdrawn".
+    // Two schema versions, one approved and one deprecated. Each records both
+    // SchemaVersion (bool) and SchemaRecord (metadata, timestamps).
     assert_eq!(
         keys_in(env, &deployment.config_id, StorageClass::Persistent).len(),
-        2
+        4
     );
 }
 

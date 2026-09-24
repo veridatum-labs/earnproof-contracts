@@ -1,7 +1,7 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, IssuerError, IssuerRecord, IssuerStatus, TTL_EXTEND_TO_LEDGERS,
+    ContractError, IssuerError, IssuerRecord, IssuerStatus, UpgradeReceipt, TTL_EXTEND_TO_LEDGERS,
     TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env};
@@ -18,6 +18,7 @@ enum DataKey {
     AllowedWasm(BytesN<32>),
     /// Monotonically-increasing contract version.  Prevents downgrade.
     ContractVersion,
+    LatestUpgradeReceipt,
 }
 
 // ── upgrade events ────────────────────────────────────────────────────────────
@@ -362,18 +363,14 @@ impl IssuerRegistryContract {
             .has(&DataKey::AllowedWasm(wasm_hash))
     }
 
-    /// Admin-only: apply an in-place WASM upgrade.
-    ///
-    /// Requirements:
-    /// 1. Caller is the admin.
-    /// 2. `wasm_hash` is on the allowlist.
-    /// 3. Target version is strictly greater than current (downgrade guard).
-    ///
-    /// On success the allowlist entry is consumed and `ContractVersion` is
-    /// advanced.
+    /// Admin-only: apply an in-place WASM upgrade with invariant assertions.
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
+        assert!(
+            earnproof_shared::is_valid_principal_address(&admin),
+            "invalid pre-upgrade admin address invariant"
+        );
 
         let new_version: u32 = env
             .storage()
@@ -386,6 +383,8 @@ impl IssuerRegistryContract {
             panic!("upgrade would not advance contract version");
         }
 
+        assert!(old_version >= 1, "invalid pre-upgrade version invariant");
+
         // Consume allowlist entry before applying to prevent replay.
         env.storage()
             .instance()
@@ -395,9 +394,28 @@ impl IssuerRegistryContract {
         env.deployer()
             .update_current_contract_wasm(wasm_hash.clone());
 
+        let post_admin = Self::get_admin(env.clone()).expect("post-upgrade admin check failed");
+        assert_eq!(
+            admin, post_admin,
+            "admin address invariant violated after upgrade"
+        );
+
         env.storage()
             .instance()
             .set(&DataKey::ContractVersion, &new_version);
+
+        let now = env.ledger().timestamp();
+        let receipt = UpgradeReceipt {
+            wasm_hash: wasm_hash.clone(),
+            old_version,
+            new_version,
+            upgraded_at: now,
+            upgraded_by: admin.clone(),
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LatestUpgradeReceipt, &receipt);
         Self::extend_instance_ttl(env.clone());
 
         ContractUpgraded {
@@ -407,6 +425,10 @@ impl IssuerRegistryContract {
             upgraded_by: admin,
         }
         .publish(&env);
+    }
+
+    pub fn get_latest_upgrade_receipt(env: Env) -> Option<UpgradeReceipt> {
+        env.storage().instance().get(&DataKey::LatestUpgradeReceipt)
     }
 
     // ── private helpers ───────────────────────────────────────────────────────

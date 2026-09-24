@@ -1,7 +1,7 @@
 # scenario: initialized
-# revision: 4
-# reason: contract version keys are now persisted in initialized ledgers
-# body-digest: 7552ea3b994fbd6209bd7c41023b7a9ef8398e79cc2da6b2d3d38c5182d52b66
+# revision: 5
+# reason: Add schema metadata, activation timestamps, and dependency version storage keys
+# body-digest: fba9a710d63a6fe860cdeff870209d4a1d4b7be504bcc6bccb60619e09a0dbe9
 
 [ledger]
 sequence = 1000
@@ -12,12 +12,15 @@ issuer-registry instance [sym:Admin] = addr:admin
 issuer-registry instance [sym:ContractVersion] = u32:1
 proof-registry instance [sym:Admin] = addr:admin
 proof-registry instance [sym:ContractVersion] = u32:1
+proof-registry instance [sym:IssuerRegistryVersion] = u32:1
 proof-registry instance [sym:IssuerRegistry] = addr:issuer-registry
+proof-registry instance [sym:ProtocolConfigVersion] = u32:1
 proof-registry instance [sym:ProtocolConfig] = addr:protocol-config
 protocol-config instance [sym:Admin] = addr:admin
 protocol-config instance [sym:ConfigVersion] = u32:2
 protocol-config instance [sym:ContractVersion] = u32:1
 protocol-config instance [sym:Paused] = false
+protocol-config persistent [sym:SchemaRecord, u32:1] = {sym:activated_at: u64:1000, sym:deprecated_at: u64:0, sym:is_approved: true, sym:metadata_hash: bytes:0101010101010101010101010101010101010101010101010101010101010101, sym:version: u32:1}
 protocol-config persistent [sym:SchemaVersion, u32:1] = true
 
 [events]

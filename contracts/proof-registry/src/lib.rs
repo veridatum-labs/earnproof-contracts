@@ -1,7 +1,7 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, ProofError, ProofRecord, ProofStatus, TTL_EXTEND_TO_LEDGERS,
+    ContractError, ProofError, ProofRecord, ProofStatus, UpgradeReceipt, TTL_EXTEND_TO_LEDGERS,
     TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{
@@ -12,11 +12,13 @@ use soroban_sdk::{
 pub trait ProtocolConfigInterface {
     fn is_paused(env: Env) -> bool;
     fn is_schema_version_approved(env: Env, version: u32) -> bool;
+    fn get_contract_version(env: Env) -> u32;
 }
 
 #[contractclient(name = "IssuerRegistryContractClient")]
 pub trait IssuerRegistryInterface {
     fn is_active_address(env: Env, issuer_address: Address) -> bool;
+    fn get_contract_version(env: Env) -> u32;
 }
 
 #[contract]
@@ -27,11 +29,14 @@ enum DataKey {
     Admin,
     IssuerRegistry,
     ProtocolConfig,
+    IssuerRegistryVersion,
+    ProtocolConfigVersion,
     Proof(BytesN<32>),
     /// Allowlist entry: maps a WASM hash to the target contract version.
     AllowedWasm(BytesN<32>),
     /// Monotonically-increasing contract version.  Prevents downgrade.
     ContractVersion,
+    LatestUpgradeReceipt,
 }
 
 // ── upgrade events ────────────────────────────────────────────────────────────
@@ -75,6 +80,10 @@ impl ProofRegistryContract {
 
         Self::require_valid_principal(&admin)?;
         Self::validate_dependency_addresses(&env, &issuer_registry, &protocol_config)?;
+
+        let (config_ver, issuer_ver) =
+            Self::validate_and_query_dependencies(&env, &issuer_registry, &protocol_config)?;
+
         Self::require_auth(&admin);
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
@@ -83,6 +92,12 @@ impl ProofRegistryContract {
         env.storage()
             .instance()
             .set(&DataKey::ProtocolConfig, &protocol_config);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProtocolConfigVersion, &config_ver);
+        env.storage()
+            .instance()
+            .set(&DataKey::IssuerRegistryVersion, &issuer_ver);
         env.storage()
             .instance()
             .set(&DataKey::ContractVersion, &1_u32);
@@ -216,6 +231,20 @@ impl ProofRegistryContract {
             .ok_or(ContractError::NotInitialized)
     }
 
+    pub fn get_dependency_versions(env: Env) -> Result<(u32, u32), ContractError> {
+        let config_ver: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProtocolConfigVersion)
+            .ok_or(ContractError::NotInitialized)?;
+        let issuer_ver: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::IssuerRegistryVersion)
+            .ok_or(ContractError::NotInitialized)?;
+        Ok((config_ver, issuer_ver))
+    }
+
     // ── upgrade governance ────────────────────────────────────────────────────
 
     /// Returns the stored monotonic contract version.  Starts at 1.
@@ -275,18 +304,27 @@ impl ProofRegistryContract {
             .has(&DataKey::AllowedWasm(wasm_hash))
     }
 
-    /// Admin-only: apply an in-place WASM upgrade.
-    ///
-    /// Requirements:
-    /// 1. Caller is the admin.
-    /// 2. `wasm_hash` is on the allowlist.
-    /// 3. Target version is strictly greater than current (downgrade guard).
-    ///
-    /// On success the allowlist entry is consumed and `ContractVersion` is
-    /// advanced.
+    /// Admin-only: apply an in-place WASM upgrade with invariant assertions.
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
+        let issuer_registry =
+            Self::get_issuer_registry(env.clone()).expect("issuer registry not initialized");
+        let protocol_config =
+            Self::get_protocol_config(env.clone()).expect("protocol config not initialized");
+
         Self::require_auth(&admin);
+        assert!(
+            earnproof_shared::is_valid_principal_address(&admin),
+            "invalid pre-upgrade admin address invariant"
+        );
+        assert!(
+            earnproof_shared::is_valid_principal_address(&issuer_registry),
+            "invalid pre-upgrade issuer_registry invariant"
+        );
+        assert!(
+            earnproof_shared::is_valid_principal_address(&protocol_config),
+            "invalid pre-upgrade protocol_config invariant"
+        );
 
         let new_version: u32 = env
             .storage()
@@ -299,7 +337,8 @@ impl ProofRegistryContract {
             panic!("upgrade would not advance contract version");
         }
 
-        // Consume allowlist entry before applying to prevent replay.
+        assert!(old_version >= 1, "invalid pre-upgrade version invariant");
+
         env.storage()
             .instance()
             .remove(&DataKey::AllowedWasm(wasm_hash.clone()));
@@ -308,9 +347,38 @@ impl ProofRegistryContract {
         env.deployer()
             .update_current_contract_wasm(wasm_hash.clone());
 
+        let post_admin = Self::get_admin(env.clone()).expect("post-upgrade admin check failed");
+        let post_issuer =
+            Self::get_issuer_registry(env.clone()).expect("post-upgrade issuer check failed");
+        let post_config =
+            Self::get_protocol_config(env.clone()).expect("post-upgrade config check failed");
+
+        assert_eq!(admin, post_admin, "admin invariant violated after upgrade");
+        assert_eq!(
+            issuer_registry, post_issuer,
+            "issuer_registry invariant violated after upgrade"
+        );
+        assert_eq!(
+            protocol_config, post_config,
+            "protocol_config invariant violated after upgrade"
+        );
+
         env.storage()
             .instance()
             .set(&DataKey::ContractVersion, &new_version);
+
+        let now = env.ledger().timestamp();
+        let receipt = UpgradeReceipt {
+            wasm_hash: wasm_hash.clone(),
+            old_version,
+            new_version,
+            upgraded_at: now,
+            upgraded_by: admin.clone(),
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LatestUpgradeReceipt, &receipt);
         Self::extend_instance_ttl(env.clone());
 
         ContractUpgraded {
@@ -320,6 +388,10 @@ impl ProofRegistryContract {
             upgraded_by: admin,
         }
         .publish(&env);
+    }
+
+    pub fn get_latest_upgrade_receipt(env: Env) -> Option<UpgradeReceipt> {
+        env.storage().instance().get(&DataKey::LatestUpgradeReceipt)
     }
 
     // ── private helpers ───────────────────────────────────────────────────────
@@ -342,6 +414,36 @@ impl ProofRegistryContract {
             return Err(ContractError::InvalidInput);
         }
         Ok(())
+    }
+
+    fn validate_and_query_dependencies(
+        env: &Env,
+        issuer_registry: &Address,
+        protocol_config: &Address,
+    ) -> Result<(u32, u32), ContractError> {
+        let config_client = ProtocolConfigContractClient::new(env, protocol_config);
+        let config_version = match config_client.try_get_contract_version() {
+            Ok(Ok(v)) => {
+                if v > 100 {
+                    return Err(ContractError::InvalidInput);
+                }
+                v
+            }
+            _ => 1,
+        };
+
+        let issuer_client = IssuerRegistryContractClient::new(env, issuer_registry);
+        let issuer_version = match issuer_client.try_get_contract_version() {
+            Ok(Ok(v)) => {
+                if v > 100 {
+                    return Err(ContractError::InvalidInput);
+                }
+                v
+            }
+            _ => 1,
+        };
+
+        Ok((config_version, issuer_version))
     }
 
     fn require_valid_principal(address: &Address) -> Result<(), ContractError> {

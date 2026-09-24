@@ -1,7 +1,7 @@
 # scenario: expired
-# revision: 5
-# reason: TTL status tracking adds deterministic live-until checkpoint keys
-# body-digest: a132ed736311ea264d26b0e40f872e5f9673802496dcff9adf9aa3a1f400a12c
+# revision: 6
+# reason: records now carry proof created_ledger and issuer metadata_uri_hash, metadata_revision, and status effective ledger metadata, and proof-registry emits proof_registered
+# body-digest: 90203aab0ff813ed1371f653f2a353a8bd4daf4ea3a5b126698230f3168fe654
 
 [ledger]
 sequence = 1000
@@ -13,14 +13,14 @@ issuer-registry instance [sym:ContractVersion] = u32:1
 issuer-registry instance [sym:InstanceLiveUntil] = u32:501000
 issuer-registry persistent [sym:AddressIssuer, addr:issuer] = bytes:1111111111111111111111111111111111111111111111111111111111111111
 issuer-registry persistent [sym:AddressTtl, addr:issuer] = u32:501000
-issuer-registry persistent [sym:Issuer, bytes:1111111111111111111111111111111111111111111111111111111111111111] = {sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222, sym:status: [sym:Active], sym:updated_at: u64:1000}
+issuer-registry persistent [sym:Issuer, bytes:1111111111111111111111111111111111111111111111111111111111111111] = {sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222, sym:metadata_revision: u32:1, sym:metadata_uri_hash: bytes:0000000000000000000000000000000000000000000000000000000000000000, sym:status: [sym:Active], sym:status_effective_ledger: u32:1000, sym:status_effective_timestamp: u64:1000, sym:updated_at: u64:1000}
 issuer-registry persistent [sym:IssuerTtl, bytes:1111111111111111111111111111111111111111111111111111111111111111] = u32:501000
 proof-registry instance [sym:Admin] = addr:admin
 proof-registry instance [sym:ContractVersion] = u32:1
 proof-registry instance [sym:InstanceLiveUntil] = u32:501000
 proof-registry instance [sym:IssuerRegistry] = addr:issuer-registry
 proof-registry instance [sym:ProtocolConfig] = addr:protocol-config
-proof-registry persistent [sym:Proof, bytes:3333333333333333333333333333333333333333333333333333333333333333] = {sym:commitment_hash: bytes:4444444444444444444444444444444444444444444444444444444444444444, sym:created_at: u64:1000, sym:expires_at: u64:2000, sym:issuer_address: addr:issuer, sym:proof_id_hash: bytes:3333333333333333333333333333333333333333333333333333333333333333, sym:revoked_at: u64:0, sym:schema_version: u32:1, sym:status: [sym:Active]}
+proof-registry persistent [sym:Proof, bytes:3333333333333333333333333333333333333333333333333333333333333333] = {sym:commitment_hash: bytes:4444444444444444444444444444444444444444444444444444444444444444, sym:created_at: u64:1000, sym:created_ledger: u32:1000, sym:expires_at: u64:2000, sym:issuer_address: addr:issuer, sym:proof_id_hash: bytes:3333333333333333333333333333333333333333333333333333333333333333, sym:revoked_at: u64:0, sym:schema_version: u32:1, sym:status: [sym:Active]}
 proof-registry persistent [sym:ProofTtl, bytes:3333333333333333333333333333333333333333333333333333333333333333] = u32:501000
 protocol-config instance [sym:Admin] = addr:admin
 protocol-config instance [sym:ConfigVersion] = u32:2
@@ -33,7 +33,8 @@ protocol-config persistent [sym:SchemaVersion, u32:1] = true
 [events]
 protocol-config topics=[sym:initialized] data={sym:admin: addr:admin}
 protocol-config topics=[sym:schema_approved] data={sym:version: u32:1}
-issuer-registry topics=[sym:issuer_registered] data={sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222}
+issuer-registry topics=[sym:issuer_registered] data={sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222, sym:metadata_revision: u32:1, sym:metadata_uri_hash: bytes:0000000000000000000000000000000000000000000000000000000000000000}
+proof-registry topics=[sym:proof_registered] data={sym:created_at: u64:1000, sym:created_ledger: u32:1000, sym:expires_at: u64:2000, sym:issuer_address: addr:issuer, sym:proof_id_hash: bytes:3333333333333333333333333333333333333333333333333333333333333333, sym:schema_version: u32:1}
 
 [verdicts]
 protocol-config.is_paused = false

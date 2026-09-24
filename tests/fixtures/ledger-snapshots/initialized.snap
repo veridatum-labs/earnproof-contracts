@@ -1,6 +1,6 @@
 # scenario: initialized
-# revision: 5
-# reason: TTL status tracking adds deterministic live-until checkpoint keys
+# revision: 6
+# reason: records now carry proof created_ledger and issuer metadata_uri_hash, metadata_revision, and status effective ledger metadata, and proof-registry emits proof_registered
 # body-digest: fd686c9a61fb59263b1659bfe34e10856998725fbb0d11b66de85703a4da1cf3
 
 [ledger]

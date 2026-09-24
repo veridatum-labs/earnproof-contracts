@@ -2,7 +2,8 @@
 
 use earnproof_shared::{
     ContractError, IssuerError, IssuerRecord, IssuerStatus, MigrationStatus, TtlStatus,
-    MAX_MIGRATION_BATCH, MIGRATION_STATUS_VERSION, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
+    MAX_MIGRATION_BATCH, METADATA_REVISION_INITIAL, MIGRATION_STATUS_VERSION,
+    TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env};
 
@@ -56,40 +57,70 @@ pub struct ContractUpgraded {
 // ---------------------------------------------------------------------------
 
 /// Emitted when an issuer is successfully registered.
+///
+/// Carries both metadata commitments: `metadata_hash` (content commitment) and
+/// `metadata_uri_hash` (canonical-URI commitment). At registration the URI
+/// commitment is the documented all-zero "no URI commitment recorded"
+/// sentinel; a real URI commitment is set later via
+/// `set_issuer_metadata_commitment`. `metadata_revision` starts at
+/// [`METADATA_REVISION_INITIAL`].
 #[contractevent]
 pub struct IssuerRegistered {
     pub issuer_id_hash: BytesN<32>,
     pub issuer_address: Address,
     pub metadata_hash: BytesN<32>,
+    pub metadata_uri_hash: BytesN<32>,
+    pub metadata_revision: u32,
     pub created_at: u64,
 }
 
-/// Emitted when an issuer's public metadata hash is updated.
+/// Emitted when an issuer's metadata commitments are updated.
+///
+/// Carries both commitments and the post-update `metadata_revision` so
+/// off-chain resolvers can distinguish a content change from a canonical-URI
+/// change without re-reading storage.
 #[contractevent]
 pub struct IssuerMetadataUpdated {
     pub issuer_id_hash: BytesN<32>,
     pub metadata_hash: BytesN<32>,
+    pub metadata_uri_hash: BytesN<32>,
+    pub metadata_revision: u32,
     pub updated_at: u64,
 }
 
 /// Emitted when an issuer is suspended.
+///
+/// `effective_ledger` and `effective_timestamp` record the ledger sequence and
+/// timestamp at which the suspension became effective.
 #[contractevent]
 pub struct IssuerSuspended {
     pub issuer_id_hash: BytesN<32>,
+    pub effective_ledger: u32,
+    pub effective_timestamp: u64,
     pub updated_at: u64,
 }
 
 /// Emitted when a suspended issuer is reactivated.
+///
+/// `effective_ledger` and `effective_timestamp` record the ledger sequence and
+/// timestamp at which the reactivation became effective.
 #[contractevent]
 pub struct IssuerReactivated {
     pub issuer_id_hash: BytesN<32>,
+    pub effective_ledger: u32,
+    pub effective_timestamp: u64,
     pub updated_at: u64,
 }
 
 /// Emitted when an issuer is permanently revoked.
+///
+/// `effective_ledger` and `effective_timestamp` record the ledger sequence and
+/// timestamp at which the revocation became effective.
 #[contractevent]
 pub struct IssuerRevoked {
     pub issuer_id_hash: BytesN<32>,
+    pub effective_ledger: u32,
+    pub effective_timestamp: u64,
     pub updated_at: u64,
 }
 
@@ -153,14 +184,25 @@ impl IssuerRegistryContract {
             return Err(IssuerError::IssuerAddressAlreadyRegistered);
         }
 
+        // Status and its effective ledger metadata are written together in a
+        // single persistent `set`, so the record's status is never stored
+        // without the ledger/timestamp at which it became effective. Timing is
+        // sourced only from the host ledger environment. The URI commitment
+        // starts at the all-zero sentinel until an explicit commitment is set.
         let now = env.ledger().timestamp();
+        let effective_ledger = env.ledger().sequence();
+        let metadata_uri_hash = Self::zero_hash(&env);
         let record = IssuerRecord {
             issuer_id_hash: issuer_id_hash.clone(),
             issuer_address: issuer_address.clone(),
             metadata_hash: metadata_hash.clone(),
+            metadata_uri_hash: metadata_uri_hash.clone(),
+            metadata_revision: METADATA_REVISION_INITIAL,
             status: IssuerStatus::Active,
             created_at: now,
             updated_at: now,
+            status_effective_ledger: effective_ledger,
+            status_effective_timestamp: now,
         };
 
         env.storage().persistent().set(&key, &record);
@@ -174,6 +216,8 @@ impl IssuerRegistryContract {
             issuer_id_hash,
             issuer_address,
             metadata_hash,
+            metadata_uri_hash,
+            metadata_revision: METADATA_REVISION_INITIAL,
             created_at: now,
         }
         .publish(&env);
@@ -202,13 +246,88 @@ impl IssuerRegistryContract {
 
         let now = env.ledger().timestamp();
         record.metadata_hash = metadata_hash.clone();
+        record.metadata_revision = record.metadata_revision.saturating_add(1);
         record.updated_at = now;
+        let metadata_uri_hash = record.metadata_uri_hash.clone();
+        let metadata_revision = record.metadata_revision;
         env.storage().persistent().set(&key, &record);
         Self::extend_issuer_key_ttl(env.clone(), &key);
 
         IssuerMetadataUpdated {
             issuer_id_hash,
             metadata_hash,
+            metadata_uri_hash,
+            metadata_revision,
+            updated_at: now,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Update both metadata commitments (content hash and canonical-URI hash)
+    /// for an issuer in one atomic operation, incrementing the metadata
+    /// revision.
+    ///
+    /// # Commitment rules
+    ///
+    /// Both commitments are opaque 32-byte digests computed off chain. No raw
+    /// URI or private metadata is ever stored on chain. A commitment must be
+    /// non-empty: the all-zero digest is rejected as
+    /// [`IssuerError::InvalidMetadataCommitment`], since it is reserved as the
+    /// "no URI commitment recorded" sentinel and is not a value any real
+    /// SHA-256 digest collides with in practice.
+    ///
+    /// # Canonical bytes and domain separation
+    ///
+    /// A backend must compute the commitments with domain separation so a
+    /// content digest can never be confused with a URI digest:
+    ///
+    /// - content:  `metadata_hash    = SHA-256("earnproof:issuer-metadata:v1"    || canonical_document_bytes)`
+    /// - location: `metadata_uri_hash = SHA-256("earnproof:issuer-metadata-uri:v1" || uri_utf8_bytes)`
+    ///
+    /// The contract treats the resulting values as opaque `BytesN<32>` and
+    /// stores and echoes them byte-for-byte; the golden vectors in the test
+    /// suite pin this encoding parity between backend and contract.
+    pub fn set_issuer_metadata_commitment(
+        env: Env,
+        issuer_id_hash: BytesN<32>,
+        metadata_hash: BytesN<32>,
+        metadata_uri_hash: BytesN<32>,
+    ) -> Result<(), IssuerError> {
+        Self::assert_operational(&env);
+        let admin = Self::get_admin(env.clone()).map_err(|_| IssuerError::IssuerNotFound)?;
+        Self::require_auth(&admin);
+
+        if Self::is_zero_hash(&env, &metadata_hash) || Self::is_zero_hash(&env, &metadata_uri_hash)
+        {
+            return Err(IssuerError::InvalidMetadataCommitment);
+        }
+
+        let key = DataKey::Issuer(issuer_id_hash.clone());
+        let mut record: IssuerRecord = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(IssuerError::IssuerNotFound)?;
+
+        if record.status == IssuerStatus::Revoked {
+            return Err(IssuerError::IssuerRevoked);
+        }
+
+        let now = env.ledger().timestamp();
+        record.metadata_hash = metadata_hash.clone();
+        record.metadata_uri_hash = metadata_uri_hash.clone();
+        record.metadata_revision = record.metadata_revision.saturating_add(1);
+        record.updated_at = now;
+        let metadata_revision = record.metadata_revision;
+        env.storage().persistent().set(&key, &record);
+        Self::extend_issuer_key_ttl(env.clone(), &key);
+
+        IssuerMetadataUpdated {
+            issuer_id_hash,
+            metadata_hash,
+            metadata_uri_hash,
+            metadata_revision,
             updated_at: now,
         }
         .publish(&env);
@@ -574,6 +693,17 @@ impl IssuerRegistryContract {
         Ok(())
     }
 
+    /// The all-zero 32-byte digest, used as the "no URI commitment recorded"
+    /// sentinel for `metadata_uri_hash`.
+    fn zero_hash(env: &Env) -> BytesN<32> {
+        BytesN::from_array(env, &[0u8; 32])
+    }
+
+    /// Returns true when `hash` is the all-zero digest (an empty commitment).
+    fn is_zero_hash(env: &Env, hash: &BytesN<32>) -> bool {
+        hash == &Self::zero_hash(env)
+    }
+
     fn set_status(
         env: Env,
         issuer_id_hash: BytesN<32>,
@@ -594,25 +724,38 @@ impl IssuerRegistryContract {
             return Err(IssuerError::InvalidTransition);
         }
 
-        record.status = status.clone();
+        // The new status and the ledger metadata marking when it became
+        // effective are written together in a single persistent `set`, so a
+        // status change is never stored without its effective ledger and
+        // timestamp. Timing is sourced only from the host ledger environment.
         let now = env.ledger().timestamp();
+        let effective_ledger = env.ledger().sequence();
+        record.status = status.clone();
         record.updated_at = now;
+        record.status_effective_ledger = effective_ledger;
+        record.status_effective_timestamp = now;
         env.storage().persistent().set(&key, &record);
         Self::extend_issuer_key_ttl(env.clone(), &key);
 
         match status {
             IssuerStatus::Active => IssuerReactivated {
                 issuer_id_hash,
+                effective_ledger,
+                effective_timestamp: now,
                 updated_at: now,
             }
             .publish(&env),
             IssuerStatus::Suspended => IssuerSuspended {
                 issuer_id_hash,
+                effective_ledger,
+                effective_timestamp: now,
                 updated_at: now,
             }
             .publish(&env),
             IssuerStatus::Revoked => IssuerRevoked {
                 issuer_id_hash,
+                effective_ledger,
+                effective_timestamp: now,
                 updated_at: now,
             }
             .publish(&env),
@@ -703,7 +846,9 @@ mod test {
     use super::{DataKey, IssuerRegistryContract, IssuerRegistryContractClient};
     use earnproof_shared::{IssuerError, IssuerStatus, TTL_THRESHOLD_LEDGERS};
     use soroban_sdk::{
-        testutils::{storage::Persistent as _, Address as _, Events, MockAuth, MockAuthInvoke},
+        testutils::{
+            storage::Persistent as _, Address as _, Events, Ledger as _, MockAuth, MockAuthInvoke,
+        },
         Address, BytesN, Env, IntoVal,
     };
 
@@ -1562,6 +1707,217 @@ mod test {
         assert_eq!(
             client.get_address_ttl_status(&issuer_address).health,
             earnproof_shared::TtlHealth::Healthy
+        );
+    }
+
+    // ── issuer metadata URI hash commitments (issue 179) ───────────────────────
+
+    #[test]
+    fn register_issuer_initializes_metadata_commitments() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        let record = client.get_issuer(&issuer_id);
+        assert_eq!(record.metadata_hash, bytes(&env, 2));
+        // The URI commitment starts at the all-zero "unset" sentinel.
+        assert_eq!(record.metadata_uri_hash, bytes(&env, 0));
+        assert_eq!(record.metadata_revision, 1);
+    }
+
+    #[test]
+    fn set_metadata_commitment_updates_both_and_increments_revision() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+
+        let content = bytes(&env, 0x11);
+        let uri = bytes(&env, 0x22);
+        client.set_issuer_metadata_commitment(&issuer_id, &content, &uri);
+
+        let record = client.get_issuer(&issuer_id);
+        // Golden-vector parity: the contract stores the exact bytes supplied,
+        // treating them as opaque commitments (no re-hashing).
+        assert_eq!(record.metadata_hash, content);
+        assert_eq!(record.metadata_uri_hash, uri);
+        assert_eq!(record.metadata_revision, 2);
+    }
+
+    #[test]
+    fn set_metadata_commitment_emits_exactly_one_event() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.set_issuer_metadata_commitment(&issuer_id, &bytes(&env, 0x11), &bytes(&env, 0x22));
+        assert_eq!(env.events().all().events().len(), 1);
+    }
+
+    #[test]
+    fn set_metadata_commitment_rejects_empty_content_commitment() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        let result = client.try_set_issuer_metadata_commitment(
+            &issuer_id,
+            &bytes(&env, 0),
+            &bytes(&env, 0x22),
+        );
+        assert_eq!(result, Err(Ok(IssuerError::InvalidMetadataCommitment)));
+    }
+
+    #[test]
+    fn set_metadata_commitment_rejects_empty_uri_commitment() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        let result = client.try_set_issuer_metadata_commitment(
+            &issuer_id,
+            &bytes(&env, 0x11),
+            &bytes(&env, 0),
+        );
+        assert_eq!(result, Err(Ok(IssuerError::InvalidMetadataCommitment)));
+    }
+
+    #[test]
+    fn set_metadata_commitment_rejects_unknown_issuer() {
+        let (env, client, _admin) = setup();
+        let result = client.try_set_issuer_metadata_commitment(
+            &bytes(&env, 7),
+            &bytes(&env, 0x11),
+            &bytes(&env, 0x22),
+        );
+        assert_eq!(result, Err(Ok(IssuerError::IssuerNotFound)));
+    }
+
+    #[test]
+    fn set_metadata_commitment_rejects_revoked_issuer() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.revoke_issuer(&issuer_id);
+        let result = client.try_set_issuer_metadata_commitment(
+            &issuer_id,
+            &bytes(&env, 0x11),
+            &bytes(&env, 0x22),
+        );
+        assert_eq!(result, Err(Ok(IssuerError::IssuerRevoked)));
+    }
+
+    #[test]
+    fn update_issuer_increments_metadata_revision() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.update_issuer(&issuer_id, &bytes(&env, 3));
+        let record = client.get_issuer(&issuer_id);
+        assert_eq!(record.metadata_hash, bytes(&env, 3));
+        assert_eq!(record.metadata_revision, 2);
+        // update_issuer leaves the URI commitment untouched.
+        assert_eq!(record.metadata_uri_hash, bytes(&env, 0));
+    }
+
+    // ── issuer status effective ledger metadata (issue 180) ────────────────────
+
+    #[test]
+    fn register_issuer_records_status_effective_metadata() {
+        let (env, client, _admin) = setup();
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 100;
+            li.timestamp = 555;
+        });
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        let record = client.get_issuer(&issuer_id);
+        assert_eq!(record.status_effective_ledger, 100);
+        assert_eq!(record.status_effective_timestamp, 555);
+    }
+
+    #[test]
+    fn suspend_updates_status_effective_metadata_atomically() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 900;
+            li.timestamp = 9_000;
+        });
+        client.suspend_issuer(&issuer_id);
+        let record = client.get_issuer(&issuer_id);
+        assert_eq!(record.status, IssuerStatus::Suspended);
+        assert_eq!(record.status_effective_ledger, 900);
+        assert_eq!(record.status_effective_timestamp, 9_000);
+    }
+
+    #[test]
+    fn each_transition_records_its_own_effective_ledger() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 10;
+            li.timestamp = 100;
+        });
+        client.suspend_issuer(&issuer_id);
+        assert_eq!(client.get_issuer(&issuer_id).status_effective_ledger, 10);
+
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 20;
+            li.timestamp = 200;
+        });
+        client.reactivate_issuer(&issuer_id);
+        assert_eq!(client.get_issuer(&issuer_id).status_effective_ledger, 20);
+
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 30;
+            li.timestamp = 300;
+        });
+        client.revoke_issuer(&issuer_id);
+        let record = client.get_issuer(&issuer_id);
+        assert_eq!(record.status, IssuerStatus::Revoked);
+        assert_eq!(record.status_effective_ledger, 30);
+        assert_eq!(record.status_effective_timestamp, 300);
+    }
+
+    #[test]
+    fn failed_transition_leaves_effective_metadata_unchanged() {
+        let (env, client, _admin) = setup();
+        let issuer_id = bytes(&env, 1);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 40;
+            li.timestamp = 400;
+        });
+        client.revoke_issuer(&issuer_id);
+        let before = client.get_issuer(&issuer_id);
+
+        // A revoked issuer cannot be reactivated; the rejected call must not
+        // touch the effective metadata.
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 50;
+            li.timestamp = 500;
+        });
+        let result = client.try_reactivate_issuer(&issuer_id);
+        assert_eq!(result, Err(Ok(IssuerError::InvalidTransition)));
+        let after = client.get_issuer(&issuer_id);
+        assert_eq!(
+            after.status_effective_ledger,
+            before.status_effective_ledger
+        );
+        assert_eq!(
+            after.status_effective_timestamp,
+            before.status_effective_timestamp
         );
     }
 }

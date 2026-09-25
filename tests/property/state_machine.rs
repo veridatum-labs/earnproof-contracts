@@ -33,7 +33,7 @@ fn setup_issuer() -> (
     let issuer_id = bytes(&env, 1);
     let issuer_address = Address::from_str(&env, ISSUER);
     let metadata = bytes(&env, 2);
-    client.register_issuer(&issuer_id, &issuer_address, &metadata);
+    client.register_issuer(&issuer_id, &issuer_address, &metadata, &metadata);
     (env, client, admin, issuer_id, issuer_address)
 }
 
@@ -61,7 +61,12 @@ fn setup_proof() -> (
     protocol.initialize(&admin);
     protocol.approve_schema_version(&1);
     issuer_registry.initialize(&admin);
-    issuer_registry.register_issuer(&bytes(&env, 9), &issuer_address, &bytes(&env, 8));
+    issuer_registry.register_issuer(
+        &bytes(&env, 9),
+        &issuer_address,
+        &bytes(&env, 8),
+        &bytes(&env, 99),
+    );
     proof.initialize(&admin, &issuer_registry_id, &protocol_id);
     (
         env,
@@ -127,11 +132,11 @@ proptest! {
 
         let result = if duplicate_id {
             try_op(&env, || {
-                client.register_issuer(&issuer_id, &other_address, &duplicate_metadata);
+                client.register_issuer(&issuer_id, &other_address, &duplicate_metadata, &duplicate_metadata);
             })
         } else {
             try_op(&env, || {
-                client.register_issuer(&other_id, &issuer_address, &duplicate_metadata);
+                client.register_issuer(&other_id, &issuer_address, &duplicate_metadata, &duplicate_metadata);
             })
         };
         prop_assert!(!result);

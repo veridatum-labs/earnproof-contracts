@@ -120,7 +120,12 @@ fn issuer_registry_accepts_backend_hashes_and_echoes_them_in_its_event() {
     // conditions, never the hash's own construction (docs/encoding.md's
     // "the contracts treat these as opaque BytesN<32> values" claim,
     // verified here rather than taken on faith).
-    client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash);
+    client.register_issuer(
+        &issuer_id_hash,
+        &issuer_address,
+        &metadata_hash,
+        &metadata_hash,
+    );
 
     let observed = events(&env);
     let registered = observed
@@ -171,7 +176,12 @@ fn proof_registry_accepts_backend_hashes_and_stores_them_queryable_by_the_same_k
     issuers.initialize(&admin);
     let issuer_id_hash = bytes_from_hex(&env, vector_hex("issuer-1"));
     let metadata_hash = bytes_from_hex(&env, vector_hex("metadata-1"));
-    issuers.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash);
+    issuers.register_issuer(
+        &issuer_id_hash,
+        &issuer_address,
+        &metadata_hash,
+        &metadata_hash,
+    );
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);

@@ -118,17 +118,28 @@ impl Deployment<'_> {
             &admin,
             &issuers_id,
             "register_issuer",
-            (&issuer_id, &issuer, &hash(&env, 0xAA)).into_val(&env),
+            (&issuer_id, &issuer, &hash(&env, 0xAA), &hash(&env, 0x99)).into_val(&env),
         );
-        issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA));
+        issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA), &hash(&env, 0x99));
         authorize(
             &env,
             &admin,
             &issuers_id,
             "register_issuer",
-            (&second_issuer_id, &second_issuer, &hash(&env, 0xBB)).into_val(&env),
+            (
+                &second_issuer_id,
+                &second_issuer,
+                &hash(&env, 0xBB),
+                &hash(&env, 0x99),
+            )
+                .into_val(&env),
         );
-        issuers.register_issuer(&second_issuer_id, &second_issuer, &hash(&env, 0xBB));
+        issuers.register_issuer(
+            &second_issuer_id,
+            &second_issuer,
+            &hash(&env, 0xBB),
+            &hash(&env, 0x99),
+        );
 
         // proof-registry: initialize with the two supporting contracts.
         authorize(

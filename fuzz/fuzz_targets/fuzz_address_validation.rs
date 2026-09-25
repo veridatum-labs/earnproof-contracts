@@ -1,5 +1,5 @@
 #![no_main]
-use earnproof_shared::{is_valid_principal_address, is_zero_or_sentinel_address};
+use earnproof_shared::is_zero_or_sentinel_address;
 use libfuzzer_sys::fuzz_target;
 use soroban_sdk::Env;
 
@@ -22,21 +22,17 @@ fuzz_target!(|data: &[u8]| {
 
     // Test validation of arbitrary strings
     // These functions should not panic, only return true/false
-    let is_valid_principal = if let Ok(addr_str) =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // We can't directly call is_valid_principal_address here because it takes an Address
-            // But we can test the logic by checking string properties
-            lossy_str.len() == 56
-                && !lossy_str.is_empty()
-                && !lossy_str.chars().all(|c| c == 'A')
-                && lossy_str
-                    .chars()
-                    .all(|c| matches!(c, 'A'..='Z' | '2'..='7'))
-        })) {
-        addr_str
-    } else {
-        false
-    };
+    let is_valid_principal = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // We can't directly call is_valid_principal_address here because it takes an Address
+        // But we can test the logic by checking string properties
+        lossy_str.len() == 56
+            && !lossy_str.is_empty()
+            && !lossy_str.chars().all(|c| c == 'A')
+            && lossy_str
+                .chars()
+                .all(|c| matches!(c, 'A'..='Z' | '2'..='7'))
+    }))
+    .unwrap_or_default();
 
     // Case 2: Test boundary cases for string length
     let _ = is_valid_principal;
@@ -52,10 +48,7 @@ fuzz_target!(|data: &[u8]| {
     let _ = is_zero_or_sentinel_address(&addr_all_a);
 
     // Pattern 2: Empty (should be rejected)
-    let empty = "";
-    if empty.len() == 0 {
-        // This tests the length check
-    }
+    let _ = lossy_str.is_empty();
 
     // Pattern 3: Too short (should be rejected)
     let too_short = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // 32 chars

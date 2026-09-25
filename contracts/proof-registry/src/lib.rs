@@ -1,7 +1,7 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, ProofError, ProofRecord, ProofStatus, TTL_EXTEND_TO_LEDGERS,
+    ContractError, PauseScope, ProofError, ProofRecord, ProofStatus, TTL_EXTEND_TO_LEDGERS,
     TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{
@@ -11,6 +11,7 @@ use soroban_sdk::{
 #[contractclient(name = "ProtocolConfigContractClient")]
 pub trait ProtocolConfigInterface {
     fn is_paused(env: Env) -> bool;
+    fn is_scope_paused(env: Env, scope: PauseScope) -> bool;
     fn is_schema_version_approved(env: Env, version: u32) -> bool;
 }
 
@@ -32,6 +33,8 @@ enum DataKey {
     AllowedWasm(BytesN<32>),
     /// Monotonically-increasing contract version.  Prevents downgrade.
     ContractVersion,
+    Successor,
+    Decommissioned,
 }
 
 // ── upgrade events ────────────────────────────────────────────────────────────
@@ -61,8 +64,36 @@ pub struct ContractUpgraded {
     pub upgraded_by: Address,
 }
 
+#[contractevent]
+pub struct SuccessorNominated {
+    pub successor: Address,
+    pub nominated_by: Address,
+}
+
+#[contractevent]
+pub struct ContractDecommissioned {
+    pub old_instance: Address,
+    pub successor_instance: Address,
+    pub activated_by: Address,
+}
+
 #[contractimpl]
 impl ProofRegistryContract {
+    pub fn is_decommissioned(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Decommissioned)
+            .unwrap_or(false)
+    }
+
+    fn ensure_not_decommissioned(env: &Env) -> Result<(), ProofError> {
+        if Self::is_decommissioned(env.clone()) {
+            Err(ProofError::ProofNotFound)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -90,6 +121,66 @@ impl ProofRegistryContract {
         Ok(())
     }
 
+    pub fn nominate_successor(env: Env, successor: Address) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let admin = Self::get_admin(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        Self::require_valid_issuer_address(&successor)?;
+        Self::require_auth(&admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Successor, &successor);
+        SuccessorNominated {
+            successor: successor.clone(),
+            nominated_by: admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    pub fn get_successor(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Successor)
+    }
+
+    pub fn activate_successor(env: Env) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let admin = Self::get_admin(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        Self::require_auth(&admin);
+        let successor: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Successor)
+            .ok_or(ProofError::ProofNotFound)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Decommissioned, &true);
+        ContractDecommissioned {
+            old_instance: env.current_contract_address(),
+            successor_instance: successor,
+            activated_by: admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    pub fn keepalive_instance(env: Env) -> bool {
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return false;
+        }
+        Self::extend_instance_ttl(env);
+        true
+    }
+
+    pub fn keepalive_proof(env: Env, proof_id_hash: BytesN<32>) -> bool {
+        let key = DataKey::Proof(proof_id_hash);
+        if env.storage().persistent().has(&key) {
+            Self::extend_proof_key_ttl(env, &key);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn register_proof(
         env: Env,
         proof_id_hash: BytesN<32>,
@@ -98,6 +189,7 @@ impl ProofRegistryContract {
         schema_version: u32,
         expires_at: u64,
     ) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
         Self::require_valid_issuer_address(&issuer_address)?;
         let protocol_config =
             Self::get_protocol_config(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
@@ -122,7 +214,7 @@ impl ProofRegistryContract {
         let protocol_config =
             Self::get_protocol_config(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
         let protocol_client = ProtocolConfigContractClient::new(&env, &protocol_config);
-        if protocol_client.is_paused() {
+        if protocol_client.is_scope_paused(&PauseScope::Registration) {
             return Err(ProofError::InvalidSchemaVersion); // Use existing error for protocol paused state
         }
 
@@ -231,6 +323,15 @@ impl ProofRegistryContract {
     /// `new_version` must be strictly greater than the current contract
     /// version to prevent pre-approving a downgrade.
     pub fn approve_upgrade(env: Env, wasm_hash: BytesN<32>, new_version: u32) {
+        if Self::is_decommissioned(env.clone()) {
+            panic!("contract is decommissioned");
+        }
+        if let Ok(protocol_config) = Self::get_protocol_config(env.clone()) {
+            let protocol_client = ProtocolConfigContractClient::new(&env, &protocol_config);
+            if protocol_client.is_scope_paused(&PauseScope::Upgrades) {
+                panic!("upgrades are paused");
+            }
+        }
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -254,6 +355,9 @@ impl ProofRegistryContract {
 
     /// Admin-only: remove a hash from the allowlist without applying it.
     pub fn revoke_upgrade(env: Env, wasm_hash: BytesN<32>) {
+        if Self::is_decommissioned(env.clone()) {
+            panic!("contract is decommissioned");
+        }
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -285,6 +389,15 @@ impl ProofRegistryContract {
     /// On success the allowlist entry is consumed and `ContractVersion` is
     /// advanced.
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
+        if Self::is_decommissioned(env.clone()) {
+            panic!("contract is decommissioned");
+        }
+        if let Ok(protocol_config) = Self::get_protocol_config(env.clone()) {
+            let protocol_client = ProtocolConfigContractClient::new(&env, &protocol_config);
+            if protocol_client.is_scope_paused(&PauseScope::Upgrades) {
+                panic!("upgrades are paused");
+            }
+        }
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
 
@@ -359,6 +472,13 @@ impl ProofRegistryContract {
     }
 
     fn set_revoked(env: Env, proof_id_hash: BytesN<32>, by_admin: bool) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        if let Ok(protocol_config) = Self::get_protocol_config(env.clone()) {
+            let protocol_client = ProtocolConfigContractClient::new(&env, &protocol_config);
+            if protocol_client.is_scope_paused(&PauseScope::Revocation) {
+                return Err(ProofError::ProofNotFound);
+            }
+        }
         let key = DataKey::Proof(proof_id_hash.clone());
         let mut record: ProofRecord = env
             .storage()
@@ -440,7 +560,12 @@ mod test {
         protocol_config_client.initialize(&admin);
         protocol_config_client.approve_schema_version(&1);
         issuer_registry_client.initialize(&admin);
-        issuer_registry_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        issuer_registry_client.register_issuer(
+            &issuer_id,
+            &issuer,
+            &bytes(&env, 8),
+            &bytes(&env, 99),
+        );
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
 
         (
@@ -555,7 +680,12 @@ mod test {
             &env,
             "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
         );
-        issuer_registry.register_issuer(&bytes(&env, 10), &inactive_issuer, &bytes(&env, 11));
+        issuer_registry.register_issuer(
+            &bytes(&env, 10),
+            &inactive_issuer,
+            &bytes(&env, 11),
+            &bytes(&env, 99),
+        );
         issuer_registry.suspend_issuer(&bytes(&env, 10));
 
         let result = client.try_register_proof(
@@ -646,7 +776,7 @@ mod test {
         pc_client.initialize(&admin);
         pc_client.approve_schema_version(&1);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
 
         let hash = BytesN::from_array(&env, &[0xde; 32]);
@@ -1265,7 +1395,7 @@ mod test {
         assert!(pc_client.is_schema_version_approved(&1));
 
         // Step 4: Register an issuer in issuer-registry
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         assert!(ir_client.is_active_address(&issuer));
 
         // Step 5: Deploy and initialize proof-registry with both dependencies
@@ -1344,7 +1474,7 @@ mod test {
         let ir_id = env.register(IssuerRegistryContract, ());
         let ir_client = IssuerRegistryContractClient::new(&env, &ir_id);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
 
         // Deploy proof-registry
         let proof_id = env.register(ProofRegistryContract, ());
@@ -1401,7 +1531,7 @@ mod test {
         let ir_client = IssuerRegistryContractClient::new(&env, &ir_id);
         ir_client.initialize(&admin);
         let issuer_id = bytes(&env, 9);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
 
         // Now proof registration should work because dependencies are initialized
         let proof_id_hash = bytes(&env, 1);
@@ -1460,7 +1590,7 @@ mod test {
 
         // Now register the issuer and everything should work
         let issuer_id = bytes(&env, 9);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
 
         proof_client.register_proof(&bytes(&env, 3), &bytes(&env, 4), &issuer, &1, &2_000);
         assert!(proof_client.is_valid_proof(&bytes(&env, 3)));
@@ -1492,7 +1622,7 @@ mod test {
         let ir_id = env.register(IssuerRegistryContract, ());
         let ir_client = IssuerRegistryContractClient::new(&env, &ir_id);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         assert!(ir_client.is_active_address(&issuer));
 
         // Initialize proof-registry third (depends on both above)
@@ -1534,7 +1664,12 @@ mod test {
             "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
         );
         let new_issuer_id = bytes(&env, 99);
-        ir_client.register_issuer(&new_issuer_id, &new_issuer, &bytes(&env, 88));
+        ir_client.register_issuer(
+            &new_issuer_id,
+            &new_issuer,
+            &bytes(&env, 88),
+            &bytes(&env, 99),
+        );
         assert!(ir_client.is_active_issuer(&new_issuer_id));
 
         // Verify admin can still perform admin operations

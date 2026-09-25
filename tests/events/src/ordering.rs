@@ -151,6 +151,7 @@ fn a_failed_step_leaves_no_gap_in_the_sequence() {
             &deployment.issuer_id,
             &Address::generate(&deployment.env),
             &hash(&deployment.env, 0xD1),
+            &hash(&deployment.env, 0x99),
         );
     });
     assert!(rejected.is_empty(), "the rejected step must be silent");
@@ -304,7 +305,7 @@ fn issuer_events_carry_hashes_rather_than_raw_identifiers() {
     let events = deployment.capture(|| {
         deployment
             .issuers
-            .register_issuer(&issuer_id, &next, &metadata)
+            .register_issuer(&issuer_id, &next, &metadata, &metadata)
     });
 
     let event = &events[0];

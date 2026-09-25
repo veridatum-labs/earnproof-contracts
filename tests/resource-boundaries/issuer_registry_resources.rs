@@ -46,7 +46,7 @@ mod issuer_registry_resource_tests {
 
         env.budget().reset_default();
 
-        client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash);
+        client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash, &metadata_hash);
         let record = client.get_issuer(&issuer_id_hash);
 
         assert_eq!(record.issuer_id_hash, issuer_id_hash);
@@ -75,7 +75,7 @@ mod issuer_registry_resource_tests {
         let metadata2 = bytes(&env, 3);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &metadata1);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata1, &metadata1);
 
         env.budget().reset_default();
         client.update_issuer(&issuer_id, &metadata2);
@@ -98,7 +98,7 @@ mod issuer_registry_resource_tests {
         let old_address = Address::from_str(&env, ISSUER_ONE);
         let new_address = Address::from_str(&env, ISSUER_TWO);
 
-        client.register_issuer(&issuer_id, &old_address, &metadata);
+        client.register_issuer(&issuer_id, &old_address, &metadata, &metadata);
 
         env.budget().reset_default();
         client.rotate_issuer_address(&issuer_id, &new_address);
@@ -120,7 +120,7 @@ mod issuer_registry_resource_tests {
         let metadata = bytes(&env, 2);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &metadata);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata, &metadata);
 
         // Suspend
         env.budget().reset_default();
@@ -159,11 +159,11 @@ mod issuer_registry_resource_tests {
         let addr2 = Address::from_str(&env, ISSUER_TWO);
 
         // Register first issuer
-        client.register_issuer(&issuer_id, &addr1, &metadata1);
+        client.register_issuer(&issuer_id, &addr1, &metadata1, &metadata1);
 
         // Attempt duplicate issuer_id
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.register_issuer(&issuer_id, &addr2, &metadata2);
+            client.register_issuer(&issuer_id, &addr2, &metadata2, &metadata2);
         }));
 
         assert!(
@@ -185,11 +185,11 @@ mod issuer_registry_resource_tests {
         let shared_address = Address::from_str(&env, ISSUER_ONE);
 
         // Register first issuer with address
-        client.register_issuer(&issuer_id1, &shared_address, &metadata1);
+        client.register_issuer(&issuer_id1, &shared_address, &metadata1, &metadata1);
 
         // Attempt to register second issuer with same address
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.register_issuer(&issuer_id2, &shared_address, &metadata2);
+            client.register_issuer(&issuer_id2, &shared_address, &metadata2, &metadata2);
         }));
 
         assert!(
@@ -208,11 +208,11 @@ mod issuer_registry_resource_tests {
         let metadata = bytes(&env, 2);
         let address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &address, &metadata);
+        client.register_issuer(&issuer_id, &address, &metadata, &metadata);
 
         // Attempt duplicate (will fail on issuer_id check)
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.register_issuer(&issuer_id, &address, &metadata);
+            client.register_issuer(&issuer_id, &address, &metadata, &metadata);
         }));
 
         if result.is_err() {
@@ -248,7 +248,7 @@ mod issuer_registry_resource_tests {
 
             // Skip if duplicate (different combinations fail)
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.register_issuer(&issuer_id, &issuer_addr, &metadata);
+                client.register_issuer(&issuer_id, &issuer_addr, &metadata, &metadata);
             }));
 
             if result.is_err() {
@@ -282,7 +282,7 @@ mod issuer_registry_resource_tests {
         let issuer_id = bytes(&env, 1);
         let initial_metadata = bytes(&env, 2);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
-        client.register_issuer(&issuer_id, &issuer_address, &initial_metadata);
+        client.register_issuer(&issuer_id, &issuer_address, &initial_metadata, &initial_metadata);
 
         env.budget().reset_default();
 
@@ -335,7 +335,7 @@ mod issuer_registry_resource_tests {
         let metadata = bytes(&env, 2);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
         env.budget().reset_default();
-        client.register_issuer(&issuer_id, &issuer_address, &metadata);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata, &metadata);
         println!("  - register_issuer(): cpu={}", env.budget().cpu_instruction_count());
 
         // Operation 4: update_issuer
@@ -398,7 +398,7 @@ mod issuer_registry_resource_tests {
         let metadata = bytes(&env, 2);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &metadata);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata, &metadata);
 
         println!("\n[resource-baseline] issuer-registry cross-contract calls:");
 

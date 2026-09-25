@@ -47,7 +47,12 @@ fn deployment() -> Deployment {
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
-    issuers.register_issuer(&bytes32(&env, 1), &issuer, &bytes32(&env, 2));
+    issuers.register_issuer(
+        &bytes32(&env, 1),
+        &issuer,
+        &bytes32(&env, 2),
+        &bytes32(&env, 99),
+    );
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
@@ -135,6 +140,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &bytes32(env, 1),
             &Address::generate(env),
             &bytes32(env, 3),
+            &bytes32(env, 99),
         )),
     );
     observed.record(
@@ -143,6 +149,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &bytes32(env, 9),
             &deployment.issuer,
             &bytes32(env, 3),
+            &bytes32(env, 99),
         )),
     );
     observed.record(
@@ -167,9 +174,12 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     );
 
     let revoked_issuer = Address::generate(env);
-    deployment
-        .issuers
-        .register_issuer(&bytes32(env, 20), &revoked_issuer, &bytes32(env, 21));
+    deployment.issuers.register_issuer(
+        &bytes32(env, 20),
+        &revoked_issuer,
+        &bytes32(env, 21),
+        &bytes32(env, 99),
+    );
     deployment.issuers.revoke_issuer(&bytes32(env, 20));
     observed.record(
         "issuer-registry update revoked issuer",
@@ -310,9 +320,12 @@ fn a_suspended_issuer_is_reported_as_invalid_schema_version() {
     let deployment = deployment();
     let env = &deployment.env;
     let suspended = Address::generate(env);
-    deployment
-        .issuers
-        .register_issuer(&bytes32(env, 40), &suspended, &bytes32(env, 41));
+    deployment.issuers.register_issuer(
+        &bytes32(env, 40),
+        &suspended,
+        &bytes32(env, 41),
+        &bytes32(env, 99),
+    );
     deployment.issuers.suspend_issuer(&bytes32(env, 40));
 
     let result = deployment.proofs.try_register_proof(

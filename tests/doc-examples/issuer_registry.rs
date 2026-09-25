@@ -61,7 +61,7 @@
 //!     let metadata_hash = BytesN::from_array(&env, &[2u8; 32]); // sha256(issuer_metadata_json)
 //!
 //!     // Register the issuer
-//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash);
+//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash, &metadata_hash);
 //!
 //!     // Verify issuer was registered with Active status
 //!     let record = client.get_issuer(&issuer_id_hash);
@@ -100,7 +100,7 @@
 //!     let issuer_address = Address::from_str(&env, "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U");
 //!     let metadata_hash = BytesN::from_array(&env, &[2u8; 32]);
 //!
-//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash);
+//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash, &metadata_hash);
 //!     assert!(client.is_active_issuer(&issuer_id_hash));
 //!
 //!     // Suspend the issuer
@@ -142,7 +142,7 @@
 //!     let issuer_address = Address::from_str(&env, "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U");
 //!     let metadata_hash = BytesN::from_array(&env, &[2u8; 32]);
 //!
-//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash);
+//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash, &metadata_hash);
 //!
 //!     // Revoke the issuer (terminal state)
 //!     client.revoke_issuer(&issuer_id_hash);
@@ -176,7 +176,7 @@
 //!     let issuer_address = Address::from_str(&env, "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U");
 //!     let metadata_hash_v1 = BytesN::from_array(&env, &[2u8; 32]);
 //!
-//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash_v1);
+//!     client.register_issuer(&issuer_id_hash, &issuer_address, &metadata_hash_v1, &metadata_hash_v1);
 //!
 //!     // Update to new metadata
 //!     let metadata_hash_v2 = BytesN::from_array(&env, &[3u8; 32]);
@@ -211,7 +211,7 @@
 //!     let issuer_address_old = Address::from_str(&env, "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U");
 //!     let metadata_hash = BytesN::from_array(&env, &[2u8; 32]);
 //!
-//!     client.register_issuer(&issuer_id_hash, &issuer_address_old, &metadata_hash);
+//!     client.register_issuer(&issuer_id_hash, &issuer_address_old, &metadata_hash, &metadata_hash);
 //!
 //!     // Rotate to a new address
 //!     let issuer_address_new = Address::from_str(&env, "GDWUSKGGFDI4FRXK5EBTRECZSVQSSWJHHJOGH6JWG3AUMFFMQ435DIAG");

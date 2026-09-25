@@ -159,7 +159,7 @@ pub fn deployment() -> Deployment {
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
-    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2));
+    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2), &bytes32(&env, 99));
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
@@ -206,13 +206,23 @@ pub fn exercised_deployment() -> Deployment {
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
-    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2));
+    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2), &bytes32(&env, 99));
     issuers.update_issuer(&issuer_id, &bytes32(&env, 3));
     issuers.rotate_issuer_address(&issuer_id, &rotated_issuer);
-    issuers.register_issuer(&bytes32(&env, 10), &suspended_issuer, &bytes32(&env, 11));
+    issuers.register_issuer(
+        &bytes32(&env, 10),
+        &suspended_issuer,
+        &bytes32(&env, 11),
+        &bytes32(&env, 99),
+    );
     issuers.suspend_issuer(&bytes32(&env, 10));
     issuers.reactivate_issuer(&bytes32(&env, 10));
-    issuers.register_issuer(&bytes32(&env, 20), &revoked_issuer, &bytes32(&env, 21));
+    issuers.register_issuer(
+        &bytes32(&env, 20),
+        &revoked_issuer,
+        &bytes32(&env, 21),
+        &bytes32(&env, 99),
+    );
     issuers.revoke_issuer(&bytes32(&env, 20));
 
     let proofs_id = env.register(ProofRegistryContract, ());
@@ -233,6 +243,17 @@ pub fn exercised_deployment() -> Deployment {
         &1_000_000,
     );
     proofs.revoke_proof(&bytes32(&env, 7));
+
+    let successor = Address::generate(&env);
+    config.set_scoped_pause(&earnproof_shared::PauseScope::Upgrades, &true);
+    config.nominate_successor(&successor);
+    config.activate_successor();
+
+    issuers.nominate_successor(&successor);
+    issuers.activate_successor();
+
+    proofs.nominate_successor(&successor);
+    proofs.activate_successor();
 
     Deployment {
         env,

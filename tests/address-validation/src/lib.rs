@@ -50,12 +50,13 @@ mod tests {
         client.initialize(&admin);
 
         let zero = Address::from_str(&env, ZERO_ADDR);
-        let result = client.try_register_issuer(&bytes(&env, 1), &zero, &bytes(&env, 2));
+        let result =
+            client.try_register_issuer(&bytes(&env, 1), &zero, &bytes(&env, 2), &bytes(&env, 99));
         assert_eq!(result, Err(Ok(IssuerError::InvalidAddress)));
 
         let issuer = Address::generate(&env);
         let issuer_id = bytes(&env, 9);
-        client.register_issuer(&issuer_id, &issuer, &bytes(&env, 7));
+        client.register_issuer(&issuer_id, &issuer, &bytes(&env, 7), &bytes(&env, 99));
         let same = client.try_rotate_issuer_address(&issuer_id, &issuer);
         assert_eq!(same, Err(Ok(IssuerError::InvalidAddress)));
     }
@@ -73,7 +74,12 @@ mod tests {
         config.initialize(&admin);
         config.approve_schema_version(&1);
         issuer_registry.initialize(&admin);
-        issuer_registry.register_issuer(&bytes(&env, 1), &issuer, &bytes(&env, 2));
+        issuer_registry.register_issuer(
+            &bytes(&env, 1),
+            &issuer,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
 
         let proof_id = env.register(ProofRegistryContract, ());
         let proof_client = ProofRegistryContractClient::new(&env, &proof_id);

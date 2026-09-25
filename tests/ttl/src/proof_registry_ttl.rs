@@ -1,4 +1,4 @@
-/// Proof Registry TTL Boundary Tests
+//! Proof Registry TTL Boundary Tests
 
 #[cfg(test)]
 mod tests {
@@ -47,7 +47,12 @@ mod tests {
         issuer_registry_client.initialize(&admin);
         let issuer = issuer_addr(env);
         let issuer_id = bytes(env, 9);
-        issuer_registry_client.register_issuer(&issuer_id, &issuer, &bytes(env, 8));
+        issuer_registry_client.register_issuer(
+            &issuer_id,
+            &issuer,
+            &bytes(env, 8),
+            &bytes(env, 99),
+        );
 
         let proof_registry_id = env.register(ProofRegistryContract, ());
         let proof_registry_client = ProofRegistryContractClient::new(env, &proof_registry_id);

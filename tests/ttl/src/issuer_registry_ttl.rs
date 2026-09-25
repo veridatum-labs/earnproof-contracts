@@ -1,4 +1,4 @@
-/// Issuer Registry TTL Boundary Tests
+//! Issuer Registry TTL Boundary Tests
 
 #[cfg(test)]
 mod tests {
@@ -95,7 +95,7 @@ mod tests {
         let (client, _admin, issuer_1) = setup(&env);
 
         let issuer_id = bytes(&env, 1);
-        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 2));
+        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 2), &bytes(&env, 99));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
         let expiry =
@@ -116,7 +116,7 @@ mod tests {
         let (client, _admin, issuer_1) = setup(&env);
 
         let issuer_id = bytes(&env, 5);
-        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 6));
+        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 6), &bytes(&env, 99));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
         let expiry =
@@ -144,7 +144,7 @@ mod tests {
         let (client, _admin, issuer_1) = setup(&env);
 
         let issuer_id = bytes(&env, 11);
-        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 12));
+        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 12), &bytes(&env, 99));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
         let expiry =
@@ -166,7 +166,7 @@ mod tests {
         let (client, _admin, issuer_1) = setup(&env);
 
         let issuer_id = bytes(&env, 13);
-        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 14));
+        client.register_issuer(&issuer_id, &issuer_1, &bytes(&env, 14), &bytes(&env, 99));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
         let expiry =

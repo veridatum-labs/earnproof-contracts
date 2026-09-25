@@ -29,6 +29,7 @@
 // deliberately unused.
 #![allow(dead_code)]
 
+use earnproof_shared::PauseScope;
 use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env};
 
 /// Rejection raised by a substitute dependency.
@@ -64,6 +65,10 @@ impl RejectsPauseRead {
         Err(MockError::DependencyRejected)
     }
 
+    pub fn is_scope_paused(_env: Env, _scope: PauseScope) -> Result<bool, MockError> {
+        Err(MockError::DependencyRejected)
+    }
+
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
         true
     }
@@ -76,6 +81,10 @@ pub struct RejectsSchemaRead;
 #[contractimpl]
 impl RejectsSchemaRead {
     pub fn is_paused(_env: Env) -> bool {
+        false
+    }
+
+    pub fn is_scope_paused(_env: Env, _scope: PauseScope) -> bool {
         false
     }
 
@@ -111,6 +120,10 @@ pub struct MalformedPauseRead;
 #[contractimpl]
 impl MalformedPauseRead {
     pub fn is_paused(_env: Env) -> u32 {
+        7
+    }
+
+    pub fn is_scope_paused(_env: Env, _scope: PauseScope) -> u32 {
         7
     }
 
@@ -164,6 +177,10 @@ impl ConfigWithoutSchemaRead {
     pub fn is_paused(_env: Env) -> bool {
         false
     }
+
+    pub fn is_scope_paused(_env: Env, _scope: PauseScope) -> bool {
+        false
+    }
 }
 
 /// An `issuer-registry` whose `is_active_address` takes an issuer id hash
@@ -208,6 +225,10 @@ impl ConfigRequiringAuth {
         false
     }
 
+    pub fn is_scope_paused(env: Env, _scope: PauseScope) -> bool {
+        Self::is_paused(env)
+    }
+
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
         true
     }
@@ -232,6 +253,10 @@ impl RecordingConfig {
     pub fn is_paused(env: Env) -> bool {
         env.storage().persistent().set(&MockKey::Touched, &true);
         false
+    }
+
+    pub fn is_scope_paused(env: Env, _scope: PauseScope) -> bool {
+        Self::is_paused(env)
     }
 
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
@@ -266,6 +291,10 @@ impl SelfPausingConfig {
             .unwrap_or(false);
         env.storage().instance().set(&MockKey::Paused, &true);
         observed
+    }
+
+    pub fn is_scope_paused(env: Env, _scope: PauseScope) -> bool {
+        Self::is_paused(env)
     }
 
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {

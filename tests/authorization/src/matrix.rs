@@ -288,11 +288,12 @@ fn matrix() -> std::vec::Vec<Case> {
                 let id = issuer_id_hash(&d.env, 0x70);
                 let address = Address::generate(&d.env);
                 let metadata = hash(&d.env, 0x71);
-                let args: soroban_sdk::Vec<Val> = (&id, &address, &metadata).into_val(&d.env);
+                let args: soroban_sdk::Vec<Val> =
+                    (&id, &address, &metadata, &metadata).into_val(&d.env);
                 match identity {
                     Identity::Missing => d
                         .issuers
-                        .try_register_issuer(&id, &address, &metadata)
+                        .try_register_issuer(&id, &address, &metadata, &metadata)
                         .is_ok(),
                     Identity::Wrong => {
                         authorize(
@@ -303,7 +304,7 @@ fn matrix() -> std::vec::Vec<Case> {
                             args.clone(),
                         );
                         d.issuers
-                            .try_register_issuer(&id, &address, &metadata)
+                            .try_register_issuer(&id, &address, &metadata, &metadata)
                             .is_ok()
                     }
                     Identity::Authorized => {
@@ -315,7 +316,7 @@ fn matrix() -> std::vec::Vec<Case> {
                             args,
                         );
                         d.issuers
-                            .try_register_issuer(&id, &address, &metadata)
+                            .try_register_issuer(&id, &address, &metadata, &metadata)
                             .is_ok()
                     }
                 }

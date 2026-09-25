@@ -142,6 +142,7 @@ pub fn deployment() -> Deployment {
         &bytes(&env, ISSUER_ID),
         &issuer,
         &bytes(&env, ISSUER_METADATA),
+        &bytes(&env, 99),
     );
 
     let proofs_id = env.register(ProofRegistryContract, ());

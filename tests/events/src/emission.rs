@@ -145,7 +145,7 @@ fn register_issuer_emits_issuer_registered_once_and_matches_storage() {
     let events = deployment.capture(|| {
         deployment
             .issuers
-            .register_issuer(&issuer_id, &next, &metadata)
+            .register_issuer(&issuer_id, &next, &metadata, &metadata)
     });
     let event = expect_single(&deployment.env, &events, "issuer_registered");
 

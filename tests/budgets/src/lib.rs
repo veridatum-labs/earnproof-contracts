@@ -218,7 +218,7 @@ mod tests {
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
         let metadata_hash = bytes(&env, 2);
 
-        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash, &metadata_hash);
 
         assert_budget(
             &env,
@@ -240,7 +240,7 @@ mod tests {
         let metadata_hash = bytes(&env, 2);
 
         client.initialize(&admin);
-        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash, &metadata_hash);
         env.cost_estimate().budget().reset_unlimited();
 
         client.get_issuer(&issuer_id);
@@ -265,7 +265,7 @@ mod tests {
         let metadata_hash = bytes(&env, 2);
 
         client.initialize(&admin);
-        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash, &metadata_hash);
         env.cost_estimate().budget().reset_unlimited();
 
         let new_metadata = bytes(&env, 99);
@@ -291,7 +291,7 @@ mod tests {
         let metadata_hash = bytes(&env, 2);
 
         client.initialize(&admin);
-        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash, &metadata_hash);
         env.cost_estimate().budget().reset_unlimited();
 
         client.suspend_issuer(&issuer_id);
@@ -316,7 +316,7 @@ mod tests {
         let metadata_hash = bytes(&env, 2);
 
         client.initialize(&admin);
-        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash);
+        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash, &metadata_hash);
         env.cost_estimate().budget().reset_unlimited();
 
         client.revoke_issuer(&issuer_id);
@@ -342,7 +342,7 @@ mod tests {
         let metadata_hash = bytes(&env, 2);
 
         client.initialize(&admin);
-        client.register_issuer(&issuer_id, &old_address, &metadata_hash);
+        client.register_issuer(&issuer_id, &old_address, &metadata_hash, &metadata_hash);
         env.cost_estimate().budget().reset_unlimited();
 
         client.rotate_issuer_address(&issuer_id, &new_address);
@@ -385,7 +385,7 @@ mod tests {
         protocol_client.initialize(&admin);
         protocol_client.approve_schema_version(&1);
         issuer_client.initialize(&admin);
-        issuer_client.register_issuer(&issuer_id, &issuer, &bytes(env, 8));
+        issuer_client.register_issuer(&issuer_id, &issuer, &bytes(env, 8), &bytes(env, 99));
         proof_client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
 
         (proof_client, protocol_client, issuer_client, issuer)

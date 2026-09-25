@@ -86,7 +86,7 @@ pub struct StorageNamespace {
 /// Adding a row here is the second half of adding a storage key; the first is
 /// adding the `DataKey` variant. Doing one without the other fails the tests in
 /// `tests/storage-keys/`.
-pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
+pub const STORAGE_NAMESPACES: [StorageNamespace; 21] = [
     StorageNamespace {
         contract: "issuer-registry",
         namespace: "AddressIssuer",
@@ -113,10 +113,26 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
     },
     StorageNamespace {
         contract: "issuer-registry",
+        namespace: "Decommissioned",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "bool",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
         namespace: "Issuer",
         arity: 1,
         class: StorageClass::Persistent,
         value: "IssuerRecord",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
+        namespace: "Successor",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "Address",
         owner: "registry operator",
     },
     StorageNamespace {
@@ -133,6 +149,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
         arity: 0,
         class: StorageClass::Instance,
         value: "u32",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "Decommissioned",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "bool",
         owner: "deployment operator",
     },
     StorageNamespace {
@@ -154,6 +178,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
     StorageNamespace {
         contract: "proof-registry",
         namespace: "ProtocolConfig",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "Address",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "Successor",
         arity: 0,
         class: StorageClass::Instance,
         value: "Address",
@@ -185,6 +217,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
     },
     StorageNamespace {
         contract: "protocol-config",
+        namespace: "Decommissioned",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "bool",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
         namespace: "Paused",
         arity: 0,
         class: StorageClass::Instance,
@@ -197,6 +237,22 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
         arity: 1,
         class: StorageClass::Persistent,
         value: "bool",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
+        namespace: "ScopedPause",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "bool",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
+        namespace: "Successor",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "Address",
         owner: "protocol operator",
     },
 ];

@@ -161,8 +161,10 @@ fn lookup_helpers_agree_with_the_inventory() {
         std::vec![
             "Admin",
             "ContractVersion",
+            "Decommissioned",
             "IssuerRegistry",
-            "ProtocolConfig"
+            "ProtocolConfig",
+            "Successor"
         ]
     );
 

@@ -201,6 +201,13 @@ pub fn exercised_deployment() -> Deployment {
     config.deprecate_schema_version(&2);
     config.pause();
     config.unpause();
+    config.pause_scope(&earnproof_shared::PauseScope::Update);
+    config.unpause_scope(&earnproof_shared::PauseScope::Update);
+    let wasm_hash_config = bytes32(&env, 0x91);
+    let pending_config = bytes32(&env, 0x94);
+    config.approve_upgrade(&wasm_hash_config, &2);
+    config.upgrade_contract(&wasm_hash_config);
+    config.approve_upgrade(&pending_config, &3);
     config.set_admin(&rotated_admin);
 
     let issuers_id = env.register(IssuerRegistryContract, ());
@@ -214,6 +221,13 @@ pub fn exercised_deployment() -> Deployment {
     issuers.reactivate_issuer(&bytes32(&env, 10));
     issuers.register_issuer(&bytes32(&env, 20), &revoked_issuer, &bytes32(&env, 21));
     issuers.revoke_issuer(&bytes32(&env, 20));
+    issuers.pause_scope(&earnproof_shared::PauseScope::Update);
+    issuers.unpause_scope(&earnproof_shared::PauseScope::Update);
+    let wasm_hash_issuers = bytes32(&env, 0x92);
+    let pending_issuers = bytes32(&env, 0x95);
+    issuers.approve_upgrade(&wasm_hash_issuers, &2);
+    issuers.upgrade_contract(&wasm_hash_issuers);
+    issuers.approve_upgrade(&pending_issuers, &3);
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
@@ -233,6 +247,14 @@ pub fn exercised_deployment() -> Deployment {
         &1_000_000,
     );
     proofs.revoke_proof(&bytes32(&env, 7));
+    proofs.archive_proof(&bytes32(&env, 7));
+    proofs.pause_scope(&earnproof_shared::PauseScope::Update);
+    proofs.unpause_scope(&earnproof_shared::PauseScope::Update);
+    let wasm_hash_proofs = bytes32(&env, 0x93);
+    let pending_proofs = bytes32(&env, 0x96);
+    proofs.approve_upgrade(&wasm_hash_proofs, &2);
+    proofs.upgrade_contract(&wasm_hash_proofs);
+    proofs.approve_upgrade(&pending_proofs, &3);
 
     Deployment {
         env,

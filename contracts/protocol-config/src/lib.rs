@@ -1,10 +1,17 @@
 #![no_std]
 
-use earnproof_shared::{ContractError, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS};
-use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env};
+use earnproof_shared::{
+    ContractError, PauseScope, UpgradeApprovalRecord, UpgradeHistoryRecord, TTL_EXTEND_TO_LEDGERS,
+    TTL_THRESHOLD_LEDGERS,
+};
+use soroban_sdk::{
+    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, Symbol, Vec,
+};
 
 #[contract]
 pub struct ProtocolConfigContract;
+
+const CONTRACT_ROLE: &str = "protocol_config";
 
 #[contracttype]
 enum DataKey {
@@ -12,12 +19,12 @@ enum DataKey {
     Paused,
     ConfigVersion,
     SchemaVersion(u32),
-    /// Allowlist entry: maps a WASM hash to the target contract version it
-    /// must install.  Only hashes pre-approved by the admin may be applied.
     AllowedWasm(BytesN<32>),
-    /// Monotonically-increasing contract version stored in instance storage.
-    /// Prevents installing an older (or equal) version over a newer one.
     ContractVersion,
+    CurrentWasmHash,
+    ScopedPause(PauseScope),
+    UpgradeHistory(u32),
+    UpgradeHistoryCount,
 }
 
 // ── existing events ─────────────────────────────────────────────────────────
@@ -52,12 +59,21 @@ pub struct SchemaDeprecated {
     pub version: u32,
 }
 
+#[contractevent]
+pub struct ScopedPauseChanged {
+    pub scope: PauseScope,
+    pub paused: bool,
+    pub changed_by: Address,
+}
+
 // ── upgrade events ───────────────────────────────────────────────────────────
 
 /// Emitted when the admin adds a WASM hash to the upgrade allowlist.
 #[contractevent]
 pub struct UpgradeAllowlisted {
     pub wasm_hash: BytesN<32>,
+    pub target_contract: Address,
+    pub contract_role: Symbol,
     pub new_contract_version: u32,
     pub approved_by: Address,
 }
@@ -67,6 +83,8 @@ pub struct UpgradeAllowlisted {
 #[contractevent]
 pub struct UpgradeRevoked {
     pub wasm_hash: BytesN<32>,
+    pub target_contract: Address,
+    pub contract_role: Symbol,
     pub revoked_by: Address,
 }
 
@@ -74,6 +92,8 @@ pub struct UpgradeRevoked {
 #[contractevent]
 pub struct ContractUpgraded {
     pub new_wasm_hash: BytesN<32>,
+    pub target_contract: Address,
+    pub contract_role: Symbol,
     pub old_contract_version: u32,
     pub new_contract_version: u32,
     pub upgraded_by: Address,
@@ -140,6 +160,66 @@ impl ProtocolConfigContract {
         env.storage().instance().set(&DataKey::Paused, &false);
         Self::bump_config_version(env.clone());
         Unpaused { paused: false }.publish(&env);
+        Ok(())
+    }
+
+    pub fn is_scope_paused(env: Env, scope: PauseScope) -> bool {
+        let specific = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ScopedPause(scope))
+            .unwrap_or(false);
+        match scope {
+            PauseScope::Global | PauseScope::Registration => Self::is_paused(env) || specific,
+            _ => specific,
+        }
+    }
+
+    pub fn pause_scope(env: Env, scope: PauseScope) -> Result<(), ContractError> {
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        if scope == PauseScope::Global {
+            return Self::pause(env);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::ScopedPause(scope), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ScopedPause(scope),
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
+        Self::bump_config_version(env.clone());
+        ScopedPauseChanged {
+            scope,
+            paused: true,
+            changed_by: admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    pub fn unpause_scope(env: Env, scope: PauseScope) -> Result<(), ContractError> {
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        if scope == PauseScope::Global {
+            return Self::unpause(env);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::ScopedPause(scope), &false);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ScopedPause(scope),
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
+        Self::bump_config_version(env.clone());
+        ScopedPauseChanged {
+            scope,
+            paused: false,
+            changed_by: admin,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -211,21 +291,35 @@ impl ProtocolConfigContract {
     /// contract version so that a downgrade cannot be pre-approved.
     pub fn approve_upgrade(env: Env, wasm_hash: BytesN<32>, new_version: u32) {
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
-
         Self::require_auth(&admin);
+        if Self::is_scope_paused(env.clone(), PauseScope::Upgrade) {
+            panic!("upgrade operations are paused");
+        }
 
         let current = Self::get_contract_version(env.clone());
         if new_version <= current {
             panic!("new_version must be greater than current contract version");
         }
 
+        let target_contract = env.current_contract_address();
+        let contract_role = Symbol::new(&env, CONTRACT_ROLE);
+
+        let approval = UpgradeApprovalRecord {
+            new_version,
+            target_contract: target_contract.clone(),
+            contract_role: contract_role.clone(),
+        };
+
+        let key = DataKey::AllowedWasm(wasm_hash.clone());
+        env.storage().persistent().set(&key, &approval);
         env.storage()
-            .instance()
-            .set(&DataKey::AllowedWasm(wasm_hash.clone()), &new_version);
-        Self::extend_instance_ttl(env.clone());
+            .persistent()
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
 
         UpgradeAllowlisted {
             wasm_hash,
+            target_contract,
+            contract_role,
             new_contract_version: new_version,
             approved_by: admin,
         }
@@ -237,76 +331,157 @@ impl ProtocolConfigContract {
     pub fn revoke_upgrade(env: Env, wasm_hash: BytesN<32>) {
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
+        if Self::is_scope_paused(env.clone(), PauseScope::Upgrade) {
+            panic!("upgrade operations are paused");
+        }
 
-        env.storage()
-            .instance()
-            .remove(&DataKey::AllowedWasm(wasm_hash.clone()));
+        let target_contract = env.current_contract_address();
+        let contract_role = Symbol::new(&env, CONTRACT_ROLE);
+
+        let key = DataKey::AllowedWasm(wasm_hash.clone());
+        env.storage().persistent().remove(&key);
 
         UpgradeRevoked {
             wasm_hash,
+            target_contract,
+            contract_role,
             revoked_by: admin,
         }
         .publish(&env);
     }
 
-    /// Returns true when `wasm_hash` is on the allowlist.
+    /// Returns true when `wasm_hash` is on the allowlist for this contract instance.
     pub fn is_upgrade_allowed(env: Env, wasm_hash: BytesN<32>) -> bool {
-        env.storage()
-            .instance()
-            .has(&DataKey::AllowedWasm(wasm_hash))
+        let key = DataKey::AllowedWasm(wasm_hash);
+        if let Some(approval) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, UpgradeApprovalRecord>(&key)
+        {
+            let current_contract = env.current_contract_address();
+            let expected_role = Symbol::new(&env, CONTRACT_ROLE);
+            approval.target_contract == current_contract && approval.contract_role == expected_role
+        } else {
+            false
+        }
     }
 
     /// Admin-only: apply an in-place WASM upgrade.
-    ///
-    /// Requirements (all checked on-chain before the upgrade is applied):
-    /// 1. Caller is the admin.
-    /// 2. `wasm_hash` is on the allowlist (pre-approved via `approve_upgrade`).
-    /// 3. The target version stored in the allowlist entry is strictly greater
-    ///    than the current `ContractVersion` (downgrade guard).
-    ///
-    /// On success the new WASM is installed, `ContractVersion` is advanced,
-    /// the allowlist entry is consumed (removed), and a `ContractUpgraded`
-    /// event is emitted.
     pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
         let admin = Self::get_admin(env.clone()).expect("contract not initialized");
         Self::require_auth(&admin);
+        if Self::is_scope_paused(env.clone(), PauseScope::Upgrade) {
+            panic!("upgrade operations are paused");
+        }
 
-        let new_version: u32 = env
+        let key = DataKey::AllowedWasm(wasm_hash.clone());
+        let approval: UpgradeApprovalRecord = env
             .storage()
-            .instance()
-            .get(&DataKey::AllowedWasm(wasm_hash.clone()))
+            .persistent()
+            .get(&key)
             .expect("wasm hash not on allowlist");
 
+        let current_contract = env.current_contract_address();
+        let expected_role = Symbol::new(&env, CONTRACT_ROLE);
+
+        if approval.target_contract != current_contract || approval.contract_role != expected_role {
+            panic!("upgrade approval does not match target contract identity or role");
+        }
+
         let old_version = Self::get_contract_version(env.clone());
-        if new_version <= old_version {
+        if approval.new_version <= old_version {
             panic!("upgrade would not advance contract version");
         }
 
-        // Consume the allowlist entry before applying so re-entrancy cannot
-        // replay the same hash.
-        env.storage()
-            .instance()
-            .remove(&DataKey::AllowedWasm(wasm_hash.clone()));
+        env.storage().persistent().remove(&key);
 
-        // Apply the WASM upgrade.  This replaces the executable code while
-        // leaving all stored state intact.
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "testutils")))]
         env.deployer()
             .update_current_contract_wasm(wasm_hash.clone());
 
-        // Record the new version.
+        let old_wasm_hash = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentWasmHash)
+            .unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]));
+
         env.storage()
             .instance()
-            .set(&DataKey::ContractVersion, &new_version);
+            .set(&DataKey::ContractVersion, &approval.new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::CurrentWasmHash, &wasm_hash);
         Self::extend_instance_ttl(env.clone());
+
+        let history_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UpgradeHistoryCount)
+            .unwrap_or(0);
+
+        let history_record = UpgradeHistoryRecord {
+            old_wasm_hash,
+            new_wasm_hash: wasm_hash.clone(),
+            old_version,
+            new_version: approval.new_version,
+            ledger_sequence: env.ledger().sequence(),
+            ledger_timestamp: env.ledger().timestamp(),
+            upgraded_by: admin.clone(),
+        };
+
+        let history_key = DataKey::UpgradeHistory(history_count);
+        env.storage()
+            .persistent()
+            .set(&history_key, &history_record);
+        env.storage().persistent().extend_ttl(
+            &history_key,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
+        env.storage()
+            .instance()
+            .set(&DataKey::UpgradeHistoryCount, &(history_count + 1));
 
         ContractUpgraded {
             new_wasm_hash: wasm_hash,
+            target_contract: current_contract,
+            contract_role: expected_role,
             old_contract_version: old_version,
-            new_contract_version: new_version,
+            new_contract_version: approval.new_version,
             upgraded_by: admin,
         }
         .publish(&env);
+    }
+
+    pub fn get_upgrade_history_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::UpgradeHistoryCount)
+            .unwrap_or(0)
+    }
+
+    pub fn get_upgrade_history(env: Env, start: u32, limit: u32) -> Vec<UpgradeHistoryRecord> {
+        let total = Self::get_upgrade_history_count(env.clone());
+        let mut result = Vec::new(&env);
+        if start >= total {
+            return result;
+        }
+        let max_limit = if limit > 50 { 50 } else { limit };
+        let end = if start + max_limit > total {
+            total
+        } else {
+            start + max_limit
+        };
+        for i in start..end {
+            if let Some(record) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, UpgradeHistoryRecord>(&DataKey::UpgradeHistory(i))
+            {
+                result.push_back(record);
+            }
+        }
+        result
     }
 
     // ── private helpers ──────────────────────────────────────────────────────
@@ -612,8 +787,7 @@ mod test {
                     &env,
                     soroban_sdk::IntoVal::into_val(&BytesN::from_array(&env, &[0xaa; 32]), &env),
                     soroban_sdk::IntoVal::into_val(&2_u32, &env),
-                ]
-                .into(),
+                ],
                 sub_invokes: &[],
             },
         }]);
@@ -849,9 +1023,8 @@ mod test {
 
         // Verify exact state written
         assert_eq!(client.get_admin(), admin, "admin must be set");
-        assert_eq!(
-            client.is_paused(),
-            false,
+        assert!(
+            !client.is_paused(),
             "protocol must not be paused after initialization"
         );
         assert_eq!(
@@ -1093,7 +1266,7 @@ mod test {
 
         // State immediately after initialization must be as documented
         assert_eq!(client.get_admin(), admin);
-        assert_eq!(client.is_paused(), false);
+        assert!(!client.is_paused());
         assert_eq!(client.get_config_version(), 1);
         assert_eq!(client.get_contract_version(), 1);
 

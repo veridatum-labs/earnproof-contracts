@@ -104,20 +104,19 @@ fn per_record_namespaces_hold_one_entry_per_record() {
     // count is six and not seven.
     assert_eq!(
         keys_in(env, &deployment.issuers_id, StorageClass::Persistent).len(),
-        6
+        9
     );
 
-    // Two proofs, one of them revoked in place.
+    // Two proofs registered, one archived (which replaces Proof key with ArchivedProof), plus pause, upgrade history, allowed WASM.
     assert_eq!(
         keys_in(env, &deployment.proofs_id, StorageClass::Persistent).len(),
-        2
+        5
     );
 
-    // Two schema versions, one approved and one deprecated. Deprecation keeps
-    // the key so that "never seen" stays distinguishable from "withdrawn".
+    // Two schema versions, one approved and one deprecated, plus pause, upgrade history, allowed WASM.
     assert_eq!(
         keys_in(env, &deployment.config_id, StorageClass::Persistent).len(),
-        2
+        5
     );
 }
 

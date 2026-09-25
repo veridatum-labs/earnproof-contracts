@@ -86,7 +86,7 @@ pub struct StorageNamespace {
 /// Adding a row here is the second half of adding a storage key; the first is
 /// adding the `DataKey` variant. Doing one without the other fails the tests in
 /// `tests/storage-keys/`.
-pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
+pub const STORAGE_NAMESPACES: [StorageNamespace; 30] = [
     StorageNamespace {
         contract: "issuer-registry",
         namespace: "AddressIssuer",
@@ -105,10 +105,26 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
     },
     StorageNamespace {
         contract: "issuer-registry",
+        namespace: "AllowedWasm",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "UpgradeApprovalRecord",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
         namespace: "ContractVersion",
         arity: 0,
         class: StorageClass::Instance,
         value: "u32",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
+        namespace: "CurrentWasmHash",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "BytesN<32>",
         owner: "deployment operator",
     },
     StorageNamespace {
@@ -120,6 +136,30 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
         owner: "registry operator",
     },
     StorageNamespace {
+        contract: "issuer-registry",
+        namespace: "ScopedPause",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "bool",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
+        namespace: "UpgradeHistory",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "UpgradeHistoryRecord",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
+        namespace: "UpgradeHistoryCount",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
         contract: "proof-registry",
         namespace: "Admin",
         arity: 0,
@@ -129,10 +169,34 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
     },
     StorageNamespace {
         contract: "proof-registry",
+        namespace: "AllowedWasm",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "UpgradeApprovalRecord",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ArchivedProof",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "ArchivedProofRecord",
+        owner: "issuing party",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
         namespace: "ContractVersion",
         arity: 0,
         class: StorageClass::Instance,
         value: "u32",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "CurrentWasmHash",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "BytesN<32>",
         owner: "deployment operator",
     },
     StorageNamespace {
@@ -160,11 +224,43 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
         owner: "deployment operator",
     },
     StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ScopedPause",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "bool",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "UpgradeHistory",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "UpgradeHistoryRecord",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "UpgradeHistoryCount",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
+        owner: "deployment operator",
+    },
+    StorageNamespace {
         contract: "protocol-config",
         namespace: "Admin",
         arity: 0,
         class: StorageClass::Instance,
         value: "Address",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
+        namespace: "AllowedWasm",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "UpgradeApprovalRecord",
         owner: "protocol operator",
     },
     StorageNamespace {
@@ -185,6 +281,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
     },
     StorageNamespace {
         contract: "protocol-config",
+        namespace: "CurrentWasmHash",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "BytesN<32>",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
         namespace: "Paused",
         arity: 0,
         class: StorageClass::Instance,
@@ -197,6 +301,30 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 14] = [
         arity: 1,
         class: StorageClass::Persistent,
         value: "bool",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
+        namespace: "ScopedPause",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "bool",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
+        namespace: "UpgradeHistory",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "UpgradeHistoryRecord",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
+        namespace: "UpgradeHistoryCount",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
         owner: "protocol operator",
     },
 ];

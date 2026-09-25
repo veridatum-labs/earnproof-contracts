@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracterror, contracttype, Address, BytesN};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Symbol};
 
 pub mod storage_namespaces;
 
@@ -167,6 +167,48 @@ pub struct ProofRecord {
     pub expires_at: u64,
     pub created_at: u64,
     pub revoked_at: u64,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PauseScope {
+    Global,
+    Registration,
+    Update,
+    Revocation,
+    Upgrade,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeApprovalRecord {
+    pub new_version: u32,
+    pub target_contract: Address,
+    pub contract_role: Symbol,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeHistoryRecord {
+    pub old_wasm_hash: BytesN<32>,
+    pub new_wasm_hash: BytesN<32>,
+    pub old_version: u32,
+    pub new_version: u32,
+    pub ledger_sequence: u32,
+    pub ledger_timestamp: u64,
+    pub upgraded_by: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArchivedProofRecord {
+    pub proof_id_hash: BytesN<32>,
+    pub commitment_hash: BytesN<32>,
+    pub issuer_address: Address,
+    pub was_revoked: bool,
+    pub schema_version: u32,
+    pub expired_at: u64,
+    pub archived_at: u64,
 }
 
 // ── Shared Test Utilities ──────────────────────────────────────────────────────

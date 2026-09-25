@@ -98,8 +98,8 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 301 | `ProofNotFound` | `ProofError` | proof-registry | returned | after-caller-change | 404 |
 | 302 | `ProofAlreadyRevoked` | `ProofError` | proof-registry | returned | never | 400 |
 | 303 | `ProofExpired` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
-| 304 | `InvalidSchemaVersion` | `ProofError` | proof-registry | returned | never | 400 |
-| 305 | `SchemaVersionNotApproved` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 304 | `InvalidSchemaVersion` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 305 | `SchemaVersionNotApproved` | `ProofError` | proof-registry | reserved | after-operator-action | 400 |
 | 307 | `ContractPaused` | `ProofError` | proof-registry | returned | after-operator-action | 503 |
 | 308 | `IssuerInactive` | `ProofError` | proof-registry | returned | after-operator-action | 403 |
 | 309 | `UnsupportedSchema` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
@@ -256,8 +256,8 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Domain: issuer-registry
 - Status: reserved
 - Retry: after-operator-action
-- Cause: Reserved for the suspended-issuer rejection. A suspended issuer is now properly reported by the proof registry as 308, not as this code.
-- Remediation: Call is_active_address before registering. An admin must reactivate the issuer; suspension is reversible, revocation is not.
+- Cause: Reserved for the suspended-issuer rejection. A suspended issuer is currently reported by the proof registry as 304, not as this code.
+- Remediation: Call is_active_address before registering rather than waiting for this code: a suspended issuer surfaces as 304 in the current release. An admin must reactivate the issuer; suspension is reversible, revocation is not.
 - Suggested HTTP status: 403
 - Client message: "Issuer is not active"
 
@@ -321,9 +321,9 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Enum: `ProofError`
 - Domain: proof-registry
 - Status: returned
-- Retry: never
-- Cause: register_proof was given schema version zero.
-- Remediation: Use a non-zero schema version. Schema version 0 is reserved and not allowed.
+- Retry: after-operator-action
+- Cause: register_proof was given schema version zero, or a precondition that the registry currently reports through this same code failed: the protocol is paused, or the issuer address is not active.
+- Remediation: Check three things in order: that the schema version is non-zero, that is_paused is false, and that is_active_address is true for the issuer. This code is overloaded in the current release; see the ambiguity note in docs/errors.md.
 - Suggested HTTP status: 400
 - Client message: "Invalid schema version"
 
@@ -331,10 +331,10 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 
 - Enum: `ProofError`
 - Domain: proof-registry
-- Status: returned
+- Status: reserved
 - Retry: after-operator-action
 - Cause: The schema version is non-zero but is not approved in protocol-config, either because it was never approved or because it was deprecated.
-- Remediation: A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns this code, because no version can be approved there.
+- Remediation: A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns UnsupportedSchema (309).
 - Suggested HTTP status: 400
 - Client message: "Schema version not approved"
 

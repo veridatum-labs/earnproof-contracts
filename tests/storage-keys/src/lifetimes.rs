@@ -108,19 +108,16 @@ fn per_record_namespaces_hold_one_entry_per_record() {
         12
     );
 
-    // Two proofs plus one TTL tracker per proof, one of them revoked in place.
+    // Two proofs, one of them revoked in place.
     assert_eq!(
         keys_in(env, &deployment.proofs_id, StorageClass::Persistent).len(),
-        4
+        2
     );
 
-    // Two schema versions, one approved and one deprecated. Each records both
-    // SchemaVersion (bool) and SchemaRecord (metadata, timestamps).
-    // Two schema versions plus one TTL tracker each. Deprecation keeps the key
-    // so that "never seen" stays distinguishable from "withdrawn".
+    // Two schema versions plus one scoped pause.
     assert_eq!(
         keys_in(env, &deployment.config_id, StorageClass::Persistent).len(),
-        4
+        3
     );
 }
 

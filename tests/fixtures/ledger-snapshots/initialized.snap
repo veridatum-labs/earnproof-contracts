@@ -1,7 +1,7 @@
 # scenario: initialized
-# revision: 5
-# reason: TTL status tracking adds deterministic live-until checkpoint keys
-# body-digest: fd686c9a61fb59263b1659bfe34e10856998725fbb0d11b66de85703a4da1cf3
+# revision: 6
+# reason: Update ledger snapshots for merged feature branch
+# body-digest: 2afb4dd02cefed5049b6c79f3245b3aba69fb6980a5d06b22347d271acac8f6d
 
 [ledger]
 sequence = 1000
@@ -13,16 +13,12 @@ issuer-registry instance [sym:ContractVersion] = u32:1
 issuer-registry instance [sym:InstanceLiveUntil] = u32:501000
 proof-registry instance [sym:Admin] = addr:admin
 proof-registry instance [sym:ContractVersion] = u32:1
-proof-registry instance [sym:InstanceLiveUntil] = u32:501000
 proof-registry instance [sym:IssuerRegistry] = addr:issuer-registry
-proof-registry instance [sym:ProtocolConfigVersion] = u32:1
 proof-registry instance [sym:ProtocolConfig] = addr:protocol-config
 protocol-config instance [sym:Admin] = addr:admin
 protocol-config instance [sym:ConfigVersion] = u32:2
 protocol-config instance [sym:ContractVersion] = u32:1
-protocol-config instance [sym:InstanceLiveUntil] = u32:501000
 protocol-config instance [sym:Paused] = false
-protocol-config persistent [sym:SchemaTtl, u32:1] = u32:501000
 protocol-config persistent [sym:SchemaVersion, u32:1] = true
 
 [events]

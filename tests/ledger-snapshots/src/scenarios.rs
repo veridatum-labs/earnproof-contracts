@@ -125,6 +125,7 @@ pub fn build(name: &str) -> Scenario {
                 &bytes32(&env, ISSUER_ID),
                 &issuer,
                 &bytes32(&env, ISSUER_METADATA),
+                &bytes32(&env, 99),
             )
         });
         recorder.after(&env, || {

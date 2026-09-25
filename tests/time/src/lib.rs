@@ -86,7 +86,12 @@ mod tests {
         let issuers_id = clock.env.register(IssuerRegistryContract, ());
         let issuers = IssuerRegistryContractClient::new(&clock.env, &issuers_id);
         issuers.initialize(&admin);
-        issuers.register_issuer(&bytes(&clock.env, 1), &issuer, &bytes(&clock.env, 2));
+        issuers.register_issuer(
+            &bytes(&clock.env, 1),
+            &issuer,
+            &bytes(&clock.env, 2),
+            &bytes(&clock.env, 99),
+        );
         let proofs_id = clock.env.register(ProofRegistryContract, ());
         let proofs = ProofRegistryContractClient::new(&clock.env, &proofs_id);
         proofs.initialize(&admin, &issuers_id, &config_id);
@@ -302,7 +307,12 @@ mod tests {
         let issuers_id = clock.env.register(IssuerRegistryContract, ());
         let issuers = IssuerRegistryContractClient::new(&clock.env, &issuers_id);
         issuers.initialize(&admin);
-        issuers.register_issuer(&bytes(&clock.env, 1), &issuer, &bytes(&clock.env, 2));
+        issuers.register_issuer(
+            &bytes(&clock.env, 1),
+            &issuer,
+            &bytes(&clock.env, 2),
+            &bytes(&clock.env, 99),
+        );
         let proofs_id = clock.env.register(ProofRegistryContract, ());
         let proofs = ProofRegistryContractClient::new(&clock.env, &proofs_id);
         proofs.initialize(&admin, &issuers_id, &config_id);

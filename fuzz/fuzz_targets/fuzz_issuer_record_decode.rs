@@ -78,9 +78,10 @@ fuzz_target!(|data: &[u8]| {
 
     // Construct the IssuerRecord - this should never panic or cause undefined behavior
     let _issuer = IssuerRecord {
-        issuer_id_hash,
+        issuer_id_hash: issuer_id_hash.clone(),
         issuer_address,
-        metadata_hash,
+        metadata_hash: metadata_hash.clone(),
+        provenance_commitment: metadata_hash,
         status,
         created_at,
         updated_at,

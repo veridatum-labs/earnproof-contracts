@@ -1,7 +1,7 @@
 # scenario: initialized
-# revision: 5
-# reason: Add issuer registration provenance commitments (#172)
-# body-digest: 7552ea3b994fbd6209bd7c41023b7a9ef8398e79cc2da6b2d3d38c5182d52b66
+# revision: 6
+# reason: Update ledger snapshots for merged feature branch
+# body-digest: 2afb4dd02cefed5049b6c79f3245b3aba69fb6980a5d06b22347d271acac8f6d
 
 [ledger]
 sequence = 1000
@@ -10,6 +10,7 @@ timestamp = 1000
 [storage]
 issuer-registry instance [sym:Admin] = addr:admin
 issuer-registry instance [sym:ContractVersion] = u32:1
+issuer-registry instance [sym:InstanceLiveUntil] = u32:501000
 proof-registry instance [sym:Admin] = addr:admin
 proof-registry instance [sym:ContractVersion] = u32:1
 proof-registry instance [sym:IssuerRegistry] = addr:issuer-registry

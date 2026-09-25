@@ -43,19 +43,23 @@ An unrecognised code is always `never`. A client that has not seen a code cannot
 
 ## Overloaded codes in this release
 
-Three conditions currently share code `304 InvalidSchemaVersion` in `register_proof`:
+The following codes are now properly separated (no longer overloaded):
 
+**Previously (pre-fix):** Three conditions shared code `304 InvalidSchemaVersion`:
 1. the schema version is zero;
 2. the protocol is paused;
 3. the issuer address is not active.
 
-The contract source marks the second and third as deliberate reuse of an existing code. The consequences for a client are concrete, and they are asserted in `tests/error-catalog/src/observed.rs` rather than merely described:
+**Currently (post-fix):** Each precondition has its distinct code:
 
-- A client waiting for `80 ProtocolPaused` to detect a pause **will never see it**. Poll `is_paused` instead.
-- A client waiting for `205 IssuerInactive` to detect a suspended issuer **will never see it**. Call `is_active_address` before registering.
-- On receiving `304`, check all three conditions in order rather than assuming the schema version was malformed.
+| Code | Condition | Retry | Recovery |
+|------|-----------|-------|----------|
+| 304  | schema version is zero | never | Use a non-zero schema version |
+| 307  | protocol is paused | after-operator-action | Poll `is_paused` and wait for unpause |
+| 308  | issuer is inactive | after-operator-action | Call `is_active_address` and wait for reactivation |
+| 309  | schema not approved | after-operator-action | Call `is_schema_version_approved` and wait for approval |
 
-This document records the deployed behaviour. Splitting `304` into distinct codes would be a compatibility event for every backend already handling it, so it is left to a release that can coordinate one; the reserved codes `80` and `205` exist for exactly that purpose.
+This separation enables clients to distinguish between different failure modes and take appropriate recovery actions, rather than checking all three conditions blindly on receipt of 304.
 
 ---
 
@@ -95,7 +99,11 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 302 | `ProofAlreadyRevoked` | `ProofError` | proof-registry | returned | never | 400 |
 | 303 | `ProofExpired` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
 | 304 | `InvalidSchemaVersion` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
-| 305 | `SchemaVersionNotApproved` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 305 | `SchemaVersionNotApproved` | `ProofError` | proof-registry | reserved | after-operator-action | 400 |
+| 307 | `ContractPaused` | `ProofError` | proof-registry | returned | after-operator-action | 503 |
+| 308 | `IssuerInactive` | `ProofError` | proof-registry | returned | after-operator-action | 403 |
+| 309 | `UnsupportedSchema` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 310 | `MalformedInput` | `ProofError` | proof-registry | reserved | after-caller-change | 400 |
 
 ## Details
 
@@ -323,11 +331,55 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 
 - Enum: `ProofError`
 - Domain: proof-registry
-- Status: returned
+- Status: reserved
 - Retry: after-operator-action
 - Cause: The schema version is non-zero but is not approved in protocol-config, either because it was never approved or because it was deprecated.
-- Remediation: A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns this code, because no version can be approved there.
+- Remediation: A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns UnsupportedSchema (309).
 - Suggested HTTP status: 400
 - Client message: "Schema version not approved"
+
+### 307 - `ContractPaused`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: The proof registry detected that the protocol is paused and rejected proof registration.
+- Remediation: Call is_paused on the protocol config contract to check if the pause is active. An operator must unpause the protocol to allow proof registration to resume.
+- Suggested HTTP status: 503
+- Client message: "Contract is paused"
+
+### 308 - `IssuerInactive`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: The issuer address is not active or was suspended.
+- Remediation: Call is_active_address on the issuer registry to confirm the issuer is active. An operator must reactivate the issuer if it was suspended.
+- Suggested HTTP status: 403
+- Client message: "Issuer is not active"
+
+### 309 - `UnsupportedSchema`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: The proof schema identifier is not supported or not registered in the protocol config.
+- Remediation: Call is_schema_version_approved on the protocol config contract to verify the schema version is approved. An operator must approve the schema version before it can be used for proof registration.
+- Suggested HTTP status: 400
+- Client message: "Schema not supported"
+
+### 310 - `MalformedInput`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: reserved
+- Retry: after-caller-change
+- Cause: Reserved for when proof input data fails format or size validation. No contract path currently returns this code; it is allocated so the code is never reused for a different meaning.
+- Remediation: Validate the proof input data against the schema before resubmitting. Ensure all required fields are present and data sizes conform to the schema limits.
+- Suggested HTTP status: 400
+- Client message: "Malformed proof input"
 
 <!-- END GENERATED -->

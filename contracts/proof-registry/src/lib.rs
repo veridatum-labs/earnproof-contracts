@@ -1,8 +1,10 @@
 #![no_std]
 
+#[allow(unused_imports)]
 use earnproof_shared::{
-    ContractError, PauseScope, ProofError, ProofRecord, ProofStatus, TTL_EXTEND_TO_LEDGERS,
-    TTL_THRESHOLD_LEDGERS,
+    ContractError, MigrationStatus, PauseScope, ProofError, ProofRecord, ProofStatus, TtlStatus,
+    UpgradeApproval, UpgradeReceipt, MAX_MIGRATION_BATCH, MIGRATION_STATUS_VERSION,
+    TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{
     contract, contractclient, contractevent, contractimpl, contracttype, Address, BytesN, Env,
@@ -25,6 +27,7 @@ pub struct ProofRegistryContract;
 
 #[contracttype]
 enum DataKey {
+    MigrationStatus,
     Admin,
     IssuerRegistry,
     ProtocolConfig,
@@ -203,6 +206,7 @@ impl ProofRegistryContract {
         }
         Self::require_auth(&issuer_address);
 
+        // Input validation (proof-specific data validation — checked before cross-contract calls)
         if schema_version == 0 {
             return Err(ProofError::InvalidSchemaVersion);
         }
@@ -211,24 +215,24 @@ impl ProofRegistryContract {
             return Err(ProofError::ProofExpired);
         }
 
-        let protocol_config =
-            Self::get_protocol_config(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        // Check 1: Contract paused (highest precedence — most external state)
         let protocol_client = ProtocolConfigContractClient::new(&env, &protocol_config);
-        if protocol_client.is_scope_paused(&PauseScope::Registration) {
-            return Err(ProofError::InvalidSchemaVersion); // Use existing error for protocol paused state
+        if protocol_client.is_paused() {
+            return Err(ProofError::ContractPaused);
         }
 
-        if !protocol_client.is_schema_version_approved(&schema_version) {
-            return Err(ProofError::SchemaVersionNotApproved);
-        }
-
-        let issuer_registry =
-            Self::get_issuer_registry(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        // Check 2: Issuer active (issuer-specific state)
         let issuer_client = IssuerRegistryContractClient::new(&env, &issuer_registry);
         if !issuer_client.is_active_address(&issuer_address) {
-            return Err(ProofError::InvalidSchemaVersion); // Simplified - issuer inactive
+            return Err(ProofError::IssuerInactive);
         }
 
+        // Check 3: Schema supported (protocol configuration state)
+        if !protocol_client.is_schema_version_approved(&schema_version) {
+            return Err(ProofError::UnsupportedSchema);
+        }
+
+        // Check 5: Uniqueness constraint (storage precondition)
         let key = DataKey::Proof(proof_id_hash.clone());
         if env.storage().persistent().has(&key) {
             return Err(ProofError::ProofAlreadyRegistered);
@@ -516,6 +520,81 @@ impl ProofRegistryContract {
             .extend_ttl(key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
+    pub fn get_migration_status(env: Env) -> Option<MigrationStatus> {
+        env.storage().instance().get(&DataKey::MigrationStatus)
+    }
+
+    pub fn begin_migration(
+        env: Env,
+        target_contract_version: u32,
+        total_items: u32,
+    ) -> Result<MigrationStatus, ContractError> {
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        if target_contract_version <= Self::get_contract_version(env.clone()) || total_items == 0 {
+            return Err(ContractError::InvalidInput);
+        }
+        if let Some(status) = Self::get_migration_status(env.clone()) {
+            return if status.target_contract_version == target_contract_version
+                && status.total_items == total_items
+            {
+                Ok(status)
+            } else {
+                Err(ContractError::InvalidState)
+            };
+        }
+        let status = MigrationStatus {
+            status_version: MIGRATION_STATUS_VERSION,
+            target_contract_version,
+            cursor: 0,
+            total_items,
+            complete: false,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::MigrationStatus, &status);
+        Self::extend_instance_ttl(env);
+        Ok(status)
+    }
+
+    pub fn advance_migration(
+        env: Env,
+        expected_cursor: u32,
+        processed_items: u32,
+    ) -> Result<MigrationStatus, ContractError> {
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        if processed_items == 0 || processed_items > MAX_MIGRATION_BATCH {
+            return Err(ContractError::InvalidInput);
+        }
+        let mut status =
+            Self::get_migration_status(env.clone()).ok_or(ContractError::InvalidState)?;
+        if expected_cursor < status.cursor {
+            return if expected_cursor.saturating_add(processed_items) <= status.cursor {
+                Ok(status)
+            } else {
+                Err(ContractError::InvalidState)
+            };
+        }
+        if expected_cursor != status.cursor || status.complete {
+            return Err(ContractError::InvalidState);
+        }
+        let next = status
+            .cursor
+            .checked_add(processed_items)
+            .ok_or(ContractError::InvalidInput)?;
+        if next > status.total_items {
+            return Err(ContractError::InvalidInput);
+        }
+        status.cursor = next;
+        status.complete = next == status.total_items;
+        env.storage()
+            .instance()
+            .set(&DataKey::MigrationStatus, &status);
+        Self::extend_instance_ttl(env);
+        Ok(status)
+    }
+
     fn require_auth(address: &Address) {
         address.require_auth();
     }
@@ -653,7 +732,7 @@ mod test {
             &2,
             &2_000,
         );
-        assert_eq!(result, Err(Ok(ProofError::SchemaVersionNotApproved)));
+        assert_eq!(result, Err(Ok(ProofError::UnsupportedSchema)));
     }
 
     #[test]
@@ -669,7 +748,7 @@ mod test {
             &1,
             &2_000,
         );
-        assert_eq!(result, Err(Ok(ProofError::InvalidSchemaVersion)));
+        assert_eq!(result, Err(Ok(ProofError::ContractPaused)));
     }
 
     #[test]
@@ -695,7 +774,7 @@ mod test {
             &1,
             &2_000,
         );
-        assert_eq!(result, Err(Ok(ProofError::InvalidSchemaVersion)));
+        assert_eq!(result, Err(Ok(ProofError::IssuerInactive)));
     }
 
     #[test]

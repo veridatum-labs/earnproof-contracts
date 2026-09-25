@@ -101,10 +101,11 @@ fn per_record_namespaces_hold_one_entry_per_record() {
 
     // Three issuers, each with a record and a reverse-index entry. The rotated
     // address replaces the old index entry rather than adding to it, so the
-    // count is six and not seven.
+    // count is twelve including one TTL tracker for every record and reverse
+    // index; the rotated address and its tracker replace their old entries.
     assert_eq!(
         keys_in(env, &deployment.issuers_id, StorageClass::Persistent).len(),
-        6
+        12
     );
 
     // Two proofs, one of them revoked in place.
@@ -113,7 +114,7 @@ fn per_record_namespaces_hold_one_entry_per_record() {
         2
     );
 
-    // Two schema versions and one scoped pause.
+    // Two schema versions plus one scoped pause.
     assert_eq!(
         keys_in(env, &deployment.config_id, StorageClass::Persistent).len(),
         3

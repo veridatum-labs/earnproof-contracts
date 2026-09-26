@@ -44,7 +44,7 @@
 //!     // Register an issuer
 //!     let issuer_id_hash = BytesN::from_array(&env, &[1u8; 32]);
 //!     let metadata_hash = BytesN::from_array(&env, &[2u8; 32]);
-//!     issuer_client.register_issuer(&issuer_id_hash, &issuer, &metadata_hash);
+//!     issuer_client.register_issuer(&issuer_id_hash, &issuer, &metadata_hash, &metadata_hash);
 //!     assert!(issuer_client.is_active_address(&issuer));
 //!
 //!     // Initialize Proof Registry with cross-contract references
@@ -218,7 +218,7 @@
 //!     issuer_client.initialize(&admin);
 //!
 //!     let issuer_id_hash = BytesN::from_array(&env, &[1u8; 32]);
-//!     issuer_client.register_issuer(&issuer_id_hash, &issuer, &BytesN::from_array(&env, &[2u8; 32]));
+//!     issuer_client.register_issuer(&issuer_id_hash, &issuer, &BytesN::from_array(&env, &[2u8; 32]), &BytesN::from_array(&env, &[3u8; 32]));
 //!
 //!     let proof_registry_id = env.register(ProofRegistryContract, ());
 //!     let proof_client = ProofRegistryContractClient::new(&env, &proof_registry_id);

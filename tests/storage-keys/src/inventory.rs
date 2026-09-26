@@ -164,10 +164,11 @@ fn lookup_helpers_agree_with_the_inventory() {
         std::vec![
             "Admin",
             "ContractVersion",
-            "InstanceLiveUntil",
+            "Decommissioned",
             "IssuerRegistry",
             "MigrationStatus",
-            "ProtocolConfig"
+            "ProtocolConfig",
+            "Successor"
         ]
     );
 

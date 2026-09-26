@@ -35,6 +35,7 @@ const DECLARED_EVENTS: &[(&str, &[&str])] = &[
             "metadata_hash",
             "metadata_uri_hash",
             "metadata_revision",
+            "provenance_commitment",
             "created_at",
         ],
     ),
@@ -191,9 +192,12 @@ fn issuer_registry_events_match_their_fixtures() {
     let second_id = hash(&deployment.env, 0x04);
 
     for event in deployment.capture(|| {
-        deployment
-            .issuers
-            .register_issuer(&second_id, &next, &hash(&deployment.env, 0xC4))
+        deployment.issuers.register_issuer(
+            &second_id,
+            &next,
+            &hash(&deployment.env, 0xC4),
+            &hash(&deployment.env, 0x99),
+        )
     }) {
         assert_matches_fixture(&deployment.env, &event);
     }

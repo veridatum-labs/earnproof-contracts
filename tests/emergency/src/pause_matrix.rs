@@ -181,6 +181,7 @@ fn matrix() -> std::vec::Vec<Case> {
                     &issuer_id_hash(&d.env, 2),
                     &next,
                     &hash(&d.env, 0xCC),
+                    &hash(&d.env, 0x99),
                 ))
             },
         },

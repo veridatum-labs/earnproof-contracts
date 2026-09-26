@@ -340,10 +340,7 @@ fn an_unapproved_schema_is_rejected_after_the_pause_check_but_before_the_issuer_
         deployment.expiry(),
     );
 
-    assert_eq!(
-        rejection,
-        Rejection::Typed(ProofError::SchemaVersionNotApproved)
-    );
+    assert_eq!(rejection, Rejection::Typed(ProofError::UnsupportedSchema));
 }
 
 // ---------------------------------------------------------------------------
@@ -417,10 +414,7 @@ fn an_inactive_issuer_is_rejected_after_both_protocol_config_checks() {
         deployment.expiry(),
     );
 
-    assert_eq!(
-        rejection,
-        Rejection::Typed(ProofError::InvalidSchemaVersion)
-    );
+    assert_eq!(rejection, Rejection::Typed(ProofError::IssuerInactive));
 }
 
 // ---------------------------------------------------------------------------
@@ -521,7 +515,7 @@ fn an_invalid_protocol_config_address_aborts_the_registration() {
     let issuers = issuer_registry::IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
     let issuer_id = hash(&env, 0x01);
-    issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA));
+    issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA), &hash(&env, 0x99));
 
     let proofs_id = env.register(proof_registry::ProofRegistryContract, ());
     let proofs = proof_registry::ProofRegistryContractClient::new(&env, &proofs_id);
@@ -563,7 +557,7 @@ fn an_invalid_issuer_registry_address_aborts_the_registration() {
     let issuers = issuer_registry::IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
     let issuer_id = hash(&env, 0x01);
-    issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA));
+    issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA), &hash(&env, 0x99));
 
     let proofs_id = env.register(proof_registry::ProofRegistryContract, ());
     let proofs = proof_registry::ProofRegistryContractClient::new(&env, &proofs_id);

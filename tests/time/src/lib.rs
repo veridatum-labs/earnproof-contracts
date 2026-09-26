@@ -86,7 +86,12 @@ mod tests {
         let issuers_id = clock.env.register(IssuerRegistryContract, ());
         let issuers = IssuerRegistryContractClient::new(&clock.env, &issuers_id);
         issuers.initialize(&admin);
-        issuers.register_issuer(&bytes(&clock.env, 1), &issuer, &bytes(&clock.env, 2));
+        issuers.register_issuer(
+            &bytes(&clock.env, 1),
+            &issuer,
+            &bytes(&clock.env, 2),
+            &bytes(&clock.env, 99),
+        );
         let proofs_id = clock.env.register(ProofRegistryContract, ());
         let proofs = ProofRegistryContractClient::new(&clock.env, &proofs_id);
         proofs.initialize(&admin, &issuers_id, &config_id);
@@ -170,7 +175,7 @@ mod tests {
                 &1,
                 &(NOW + 1)
             ),
-            Err(Ok(ProofError::InvalidSchemaVersion))
+            Err(Ok(ProofError::ContractPaused))
         );
     }
 
@@ -227,7 +232,7 @@ mod tests {
                 &1,
                 &(NOW + 1),
             ),
-            Err(Ok(ProofError::SchemaVersionNotApproved))
+            Err(Ok(ProofError::UnsupportedSchema))
         );
     }
 
@@ -246,7 +251,7 @@ mod tests {
                 &2,
                 &(NOW + 1),
             ),
-            Err(Ok(ProofError::SchemaVersionNotApproved))
+            Err(Ok(ProofError::UnsupportedSchema))
         );
     }
 
@@ -269,7 +274,7 @@ mod tests {
                 &1,
                 &(NOW + 100),
             ),
-            Err(Ok(ProofError::SchemaVersionNotApproved))
+            Err(Ok(ProofError::UnsupportedSchema))
         );
     }
 
@@ -302,7 +307,12 @@ mod tests {
         let issuers_id = clock.env.register(IssuerRegistryContract, ());
         let issuers = IssuerRegistryContractClient::new(&clock.env, &issuers_id);
         issuers.initialize(&admin);
-        issuers.register_issuer(&bytes(&clock.env, 1), &issuer, &bytes(&clock.env, 2));
+        issuers.register_issuer(
+            &bytes(&clock.env, 1),
+            &issuer,
+            &bytes(&clock.env, 2),
+            &bytes(&clock.env, 99),
+        );
         let proofs_id = clock.env.register(ProofRegistryContract, ());
         let proofs = ProofRegistryContractClient::new(&clock.env, &proofs_id);
         proofs.initialize(&admin, &issuers_id, &config_id);

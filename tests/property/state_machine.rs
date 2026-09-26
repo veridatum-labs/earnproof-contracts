@@ -59,7 +59,7 @@ fn setup_proof() -> (
     let admin = Address::from_str(&env, ADMIN);
     let issuer_address = Address::from_str(&env, ISSUER);
     protocol.initialize(&admin);
-    protocol.approve_schema_version(&1);
+    protocol.approve_schema_version(&bytes(&env, 0x10), &1);
     issuer_registry.initialize(&admin);
     issuer_registry.register_issuer(
         &bytes(&env, 9),
@@ -98,10 +98,11 @@ proptest! {
             };
 
             let before = client.get_issuer(&issuer_id);
+            let pid = bytes(&env, (0x10 + i) as u8);
             let success = try_op(&env, || match op_kind {
-                0 => { client.suspend_issuer(&issuer_id); }
-                1 => { client.reactivate_issuer(&issuer_id); }
-                _ => { client.revoke_issuer(&issuer_id); }
+                0 => { client.suspend_issuer(&pid, &issuer_id); }
+                1 => { client.reactivate_issuer(&pid, &issuer_id); }
+                _ => { client.revoke_issuer(&pid, &issuer_id); }
             });
             prop_assert_eq!(success, expected_success, "iteration {}", i);
 
@@ -183,11 +184,12 @@ proptest! {
         pauses in prop::collection::vec(any::<bool>(), 0..10),
     ) {
         let (env, proof, protocol, _issuer_registry, _admin, issuer_address, _base_time) = setup_proof();
-        for pause in pauses {
+        for (i, pause) in pauses.into_iter().enumerate() {
+            let pid = bytes(&env, (0x10 + i) as u8);
             if pause {
-                try_op(&env, || { protocol.pause(); });
+                try_op(&env, || { protocol.pause(&pid); });
             } else {
-                try_op(&env, || { protocol.unpause(); });
+                try_op(&env, || { protocol.unpause(&pid); });
             }
         }
 
@@ -221,7 +223,8 @@ proptest! {
         let mut current_admin = admin.clone();
         let mut approved = false;
 
-        for op in ops {
+        for (i, op) in ops.into_iter().enumerate() {
+            let pid = bytes(&env, (0x10 + i) as u8);
             match op % 2 {
                 0 => {
                     let new_admin = if current_admin == admin {
@@ -229,17 +232,17 @@ proptest! {
                     } else {
                         admin.clone()
                     };
-                    let result = try_op(&env, || { client.set_admin(&new_admin); });
+                    let result = try_op(&env, || { client.set_admin(&pid, &new_admin); });
                     prop_assert!(result);
                     current_admin = new_admin;
                 }
                 _ => {
                     if approved {
-                        let result = try_op(&env, || { client.deprecate_schema_version(&1); });
+                        let result = try_op(&env, || { client.deprecate_schema_version(&pid, &1); });
                         prop_assert!(result);
                         approved = false;
                     } else {
-                        let result = try_op(&env, || { client.approve_schema_version(&1); });
+                        let result = try_op(&env, || { client.approve_schema_version(&pid, &1); });
                         prop_assert!(result);
                         approved = true;
                     }

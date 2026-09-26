@@ -55,7 +55,9 @@ fn pause_requires_the_current_admin() {
     let deployment = Deployment::new();
     let config_address = deployment.config.address.clone();
 
-    deployment.config.pause();
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
     assert_authorized_by(&deployment, &deployment.admin, &config_address, "pause");
 }
 
@@ -64,8 +66,12 @@ fn unpause_requires_the_current_admin() {
     let deployment = Deployment::new();
     let config_address = deployment.config.address.clone();
 
-    deployment.config.pause();
-    deployment.config.unpause();
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .config
+        .unpause(&crate::harness::hash(&deployment.env, 0x11));
     assert_authorized_by(&deployment, &deployment.admin, &config_address, "unpause");
 }
 
@@ -76,17 +82,25 @@ fn pause_authority_follows_rotation_and_does_not_stay_with_the_former_admin() {
     let former_admin = deployment.admin.clone();
     let new_admin = Address::generate(&deployment.env);
 
-    deployment.config.pause();
-    deployment.config.set_admin(&new_admin);
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .config
+        .set_admin(&crate::harness::hash(&deployment.env, 0x12), &new_admin);
     assert_eq!(deployment.config.get_admin(), new_admin);
 
     // The contract must now demand the new administrator's signature. If the
     // former admin were still accepted, the rotation would not have contained
     // anything — the removed party could unpause at will.
-    deployment.config.unpause();
+    deployment
+        .config
+        .unpause(&crate::harness::hash(&deployment.env, 0x11));
     assert_authorized_by(&deployment, &new_admin, &config_address, "unpause");
 
-    deployment.config.pause();
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x13));
     assert_authorized_by(&deployment, &new_admin, &config_address, "pause");
 
     assert_ne!(
@@ -104,8 +118,12 @@ fn rotation_does_not_clear_the_pause_flag() {
     let deployment = Deployment::new();
     let new_admin = Address::generate(&deployment.env);
 
-    deployment.config.pause();
-    deployment.config.set_admin(&new_admin);
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .config
+        .set_admin(&crate::harness::hash(&deployment.env, 0x12), &new_admin);
 
     assert!(
         deployment.config.is_paused(),
@@ -120,13 +138,19 @@ fn a_former_admin_cannot_reclaim_authority_by_calling_set_admin() {
     let former_admin = deployment.admin.clone();
     let new_admin = Address::generate(&deployment.env);
 
-    deployment.config.pause();
-    deployment.config.set_admin(&new_admin);
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .config
+        .set_admin(&crate::harness::hash(&deployment.env, 0x12), &new_admin);
 
     // The former admin attempts to rotate authority back to themselves. Under
     // `mock_all_auths` the call is not rejected, so the assertion is on who the
     // contract required: it must be the *current* admin, never the caller.
-    deployment.config.set_admin(&former_admin);
+    deployment
+        .config
+        .set_admin(&crate::harness::hash(&deployment.env, 0x13), &former_admin);
     assert_authorized_by(&deployment, &new_admin, &config_address, "set_admin");
 }
 
@@ -138,9 +162,12 @@ fn every_rotation_is_observable_through_the_config_version() {
     let deployment = Deployment::new();
     let mut previous = deployment.config.get_config_version();
 
-    for _ in 0..3 {
+    for i in 0..3 {
         let next_admin = Address::generate(&deployment.env);
-        deployment.config.set_admin(&next_admin);
+        deployment.config.set_admin(
+            &crate::harness::hash(&deployment.env, 0x20 + i),
+            &next_admin,
+        );
 
         let current = deployment.config.get_config_version();
         assert!(
@@ -159,14 +186,20 @@ fn rotation_to_the_incumbent_is_accepted_without_changing_authority() {
     let deployment = Deployment::new();
     let admin = deployment.admin.clone();
 
-    deployment.config.pause();
-    deployment.config.set_admin(&admin);
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .config
+        .set_admin(&crate::harness::hash(&deployment.env, 0x12), &admin);
 
     assert_eq!(deployment.config.get_admin(), admin);
     assert!(deployment.config.is_paused());
 
     // Authority is intact: the contract still works for the same administrator.
-    deployment.config.unpause();
+    deployment
+        .config
+        .unpause(&crate::harness::hash(&deployment.env, 0x11));
     assert!(!deployment.config.is_paused());
 }
 
@@ -180,7 +213,9 @@ fn registry_admins_are_independent_of_the_config_admin() {
     let original = deployment.admin.clone();
     let new_admin = Address::generate(&deployment.env);
 
-    deployment.config.set_admin(&new_admin);
+    deployment
+        .config
+        .set_admin(&crate::harness::hash(&deployment.env, 0x12), &new_admin);
 
     assert_eq!(deployment.config.get_admin(), new_admin);
     assert_eq!(
@@ -203,8 +238,12 @@ fn admin_revocation_authority_follows_the_proof_registry_admin_only() {
     let config_admin = Address::generate(&deployment.env);
 
     // Move the config admin, then confirm proof-registry still demands its own.
-    deployment.config.set_admin(&config_admin);
-    deployment.config.pause();
+    deployment
+        .config
+        .set_admin(&crate::harness::hash(&deployment.env, 0x12), &config_admin);
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
 
     deployment.proofs.admin_revoke_proof(&proof_id);
     assert_authorized_by(
@@ -221,8 +260,12 @@ fn issuer_containment_requires_the_issuer_registry_admin() {
     let issuers_address = deployment.issuers.address.clone();
     let issuer_id = crate::harness::issuer_id_hash(&deployment.env, 1);
 
-    deployment.config.pause();
-    deployment.issuers.suspend_issuer(&issuer_id);
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .issuers
+        .suspend_issuer(&crate::harness::hash(&deployment.env, 0x13), &issuer_id);
 
     assert_authorized_by(
         &deployment,
@@ -242,7 +285,9 @@ fn rotating_an_issuer_address_during_pause_releases_the_old_mapping() {
     let compromised = deployment.issuer.clone();
     let replacement = Address::generate(&deployment.env);
 
-    deployment.config.pause();
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
     deployment
         .issuers
         .rotate_issuer_address(&issuer_id, &replacement);
@@ -261,14 +306,20 @@ fn a_revoked_issuer_cannot_be_reactivated_after_the_incident() {
     let deployment = Deployment::new();
     let issuer_id = crate::harness::issuer_id_hash(&deployment.env, 1);
 
-    deployment.config.pause();
-    deployment.issuers.revoke_issuer(&issuer_id);
-    deployment.config.unpause();
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .issuers
+        .revoke_issuer(&crate::harness::hash(&deployment.env, 0x14), &issuer_id);
+    deployment
+        .config
+        .unpause(&crate::harness::hash(&deployment.env, 0x11));
 
     assert!(
         deployment
             .issuers
-            .try_reactivate_issuer(&issuer_id)
+            .try_reactivate_issuer(&crate::harness::hash(&deployment.env, 0x15), &issuer_id)
             .is_err(),
         "revocation must survive the end of the pause"
     );
@@ -283,9 +334,15 @@ fn a_revoked_issuer_cannot_register_new_proofs_after_unpause() {
     let deployment = Deployment::new();
     let issuer_id = crate::harness::issuer_id_hash(&deployment.env, 1);
 
-    deployment.config.pause();
-    deployment.issuers.revoke_issuer(&issuer_id);
-    deployment.config.unpause();
+    deployment
+        .config
+        .pause(&crate::harness::hash(&deployment.env, 0x10));
+    deployment
+        .issuers
+        .revoke_issuer(&crate::harness::hash(&deployment.env, 0x14), &issuer_id);
+    deployment
+        .config
+        .unpause(&crate::harness::hash(&deployment.env, 0x11));
 
     assert!(
         deployment

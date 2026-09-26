@@ -64,7 +64,7 @@ fn issuer_registry_initialize_emits_no_event() {
 #[test]
 fn pause_emits_paused_once_and_matches_state() {
     let deployment = Deployment::new();
-    let events = deployment.capture(|| deployment.config.pause());
+    let events = deployment.capture(|| deployment.config.pause(&hash(&deployment.env, 0x10)));
     let event = expect_single(&deployment.env, &events, "paused");
 
     let flag: bool = event
@@ -79,8 +79,8 @@ fn pause_emits_paused_once_and_matches_state() {
 #[test]
 fn unpause_emits_unpaused_once_and_matches_state() {
     let deployment = Deployment::new();
-    deployment.config.pause();
-    let events = deployment.capture(|| deployment.config.unpause());
+    deployment.config.pause(&hash(&deployment.env, 0x10));
+    let events = deployment.capture(|| deployment.config.unpause(&hash(&deployment.env, 0x11)));
     let event = expect_single(&deployment.env, &events, "unpaused");
 
     let flag: bool = event
@@ -94,7 +94,11 @@ fn unpause_emits_unpaused_once_and_matches_state() {
 fn set_admin_emits_admin_changed_once_and_matches_state() {
     let deployment = Deployment::new();
     let successor = Address::generate(&deployment.env);
-    let events = deployment.capture(|| deployment.config.set_admin(&successor));
+    let events = deployment.capture(|| {
+        deployment
+            .config
+            .set_admin(&hash(&deployment.env, 0x12), &successor)
+    });
     let event = expect_single(&deployment.env, &events, "admin_changed");
 
     let announced: Address = event
@@ -108,7 +112,11 @@ fn set_admin_emits_admin_changed_once_and_matches_state() {
 #[test]
 fn approve_schema_version_emits_schema_approved_once() {
     let deployment = Deployment::new();
-    let events = deployment.capture(|| deployment.config.approve_schema_version(&7));
+    let events = deployment.capture(|| {
+        deployment
+            .config
+            .approve_schema_version(&hash(&deployment.env, 0x13), &7)
+    });
     let event = expect_single(&deployment.env, &events, "schema_approved");
 
     let version: u32 = event
@@ -121,8 +129,11 @@ fn approve_schema_version_emits_schema_approved_once() {
 #[test]
 fn deprecate_schema_version_emits_schema_deprecated_once() {
     let deployment = Deployment::new();
-    let events =
-        deployment.capture(|| deployment.config.deprecate_schema_version(&APPROVED_SCHEMA));
+    let events = deployment.capture(|| {
+        deployment
+            .config
+            .deprecate_schema_version(&hash(&deployment.env, 0x14), &APPROVED_SCHEMA)
+    });
     let event = expect_single(&deployment.env, &events, "schema_deprecated");
 
     let version: u32 = event
@@ -186,7 +197,11 @@ fn update_issuer_emits_issuer_metadata_updated_once_and_matches_storage() {
 #[test]
 fn suspend_issuer_emits_issuer_suspended_once_and_matches_storage() {
     let deployment = Deployment::new();
-    let events = deployment.capture(|| deployment.issuers.suspend_issuer(&deployment.issuer_id));
+    let events = deployment.capture(|| {
+        deployment
+            .issuers
+            .suspend_issuer(&hash(&deployment.env, 0x15), &deployment.issuer_id)
+    });
     let event = expect_single(&deployment.env, &events, "issuer_suspended");
 
     let record = deployment.issuers.get_issuer(&deployment.issuer_id);
@@ -199,8 +214,14 @@ fn suspend_issuer_emits_issuer_suspended_once_and_matches_storage() {
 #[test]
 fn reactivate_issuer_emits_issuer_reactivated_once_and_matches_storage() {
     let deployment = Deployment::new();
-    deployment.issuers.suspend_issuer(&deployment.issuer_id);
-    let events = deployment.capture(|| deployment.issuers.reactivate_issuer(&deployment.issuer_id));
+    deployment
+        .issuers
+        .suspend_issuer(&hash(&deployment.env, 0x16), &deployment.issuer_id);
+    let events = deployment.capture(|| {
+        deployment
+            .issuers
+            .reactivate_issuer(&hash(&deployment.env, 0x17), &deployment.issuer_id)
+    });
     let event = expect_single(&deployment.env, &events, "issuer_reactivated");
 
     let record = deployment.issuers.get_issuer(&deployment.issuer_id);
@@ -213,7 +234,11 @@ fn reactivate_issuer_emits_issuer_reactivated_once_and_matches_storage() {
 #[test]
 fn revoke_issuer_emits_issuer_revoked_once_and_matches_storage() {
     let deployment = Deployment::new();
-    let events = deployment.capture(|| deployment.issuers.revoke_issuer(&deployment.issuer_id));
+    let events = deployment.capture(|| {
+        deployment
+            .issuers
+            .revoke_issuer(&hash(&deployment.env, 0x18), &deployment.issuer_id)
+    });
     let event = expect_single(&deployment.env, &events, "issuer_revoked");
 
     let record = deployment.issuers.get_issuer(&deployment.issuer_id);

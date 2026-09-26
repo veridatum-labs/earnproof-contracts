@@ -5,6 +5,11 @@
   "schema_version": 1,
   "topics": ["SchemaDeprecated"],
   "payload": {
+    "proposal_id": {
+      "type": "BytesN<32>",
+      "description": "Governance proposal identifier.",
+      "example": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
     "version": {
       "type": "U32",
       "description": "Schema version number that has been deprecated and is no longer valid for proof registration.",

@@ -40,26 +40,37 @@ fn each_mutation_publishes_exactly_one_event() {
     let replacement = Address::generate(&deployment.env);
 
     let sequence: std::vec::Vec<NamedCall> = std::vec![
-        ("pause", std::boxed::Box::new(|| deployment.config.pause())),
+        (
+            "pause",
+            std::boxed::Box::new(|| deployment.config.pause(&hash(&deployment.env, 0x10)))
+        ),
         (
             "unpause",
-            std::boxed::Box::new(|| deployment.config.unpause())
+            std::boxed::Box::new(|| deployment.config.unpause(&hash(&deployment.env, 0x11)))
         ),
         (
             "approve_schema_version",
-            std::boxed::Box::new(|| deployment.config.approve_schema_version(&5))
+            std::boxed::Box::new(|| deployment
+                .config
+                .approve_schema_version(&hash(&deployment.env, 0x12), &5))
         ),
         (
             "deprecate_schema_version",
-            std::boxed::Box::new(|| deployment.config.deprecate_schema_version(&5))
+            std::boxed::Box::new(|| deployment
+                .config
+                .deprecate_schema_version(&hash(&deployment.env, 0x13), &5))
         ),
         (
             "suspend_issuer",
-            std::boxed::Box::new(|| deployment.issuers.suspend_issuer(&deployment.issuer_id))
+            std::boxed::Box::new(|| deployment
+                .issuers
+                .suspend_issuer(&hash(&deployment.env, 0x14), &deployment.issuer_id))
         ),
         (
             "reactivate_issuer",
-            std::boxed::Box::new(|| deployment.issuers.reactivate_issuer(&deployment.issuer_id))
+            std::boxed::Box::new(|| deployment
+                .issuers
+                .reactivate_issuer(&hash(&deployment.env, 0x15), &deployment.issuer_id))
         ),
         (
             "update_issuer",
@@ -79,7 +90,9 @@ fn each_mutation_publishes_exactly_one_event() {
         ),
         (
             "set_admin",
-            std::boxed::Box::new(|| deployment.config.set_admin(&successor))
+            std::boxed::Box::new(|| deployment
+                .config
+                .set_admin(&hash(&deployment.env, 0x16), &successor))
         ),
     ];
 
@@ -111,10 +124,18 @@ fn a_multi_step_sequence_publishes_events_in_invocation_order() {
         }
     };
 
-    record(deployment.capture(|| deployment.config.pause()));
-    record(deployment.capture(|| deployment.issuers.suspend_issuer(&deployment.issuer_id)));
-    record(deployment.capture(|| deployment.issuers.revoke_issuer(&deployment.issuer_id)));
-    record(deployment.capture(|| deployment.config.unpause()));
+    record(deployment.capture(|| deployment.config.pause(&hash(&deployment.env, 0x20))));
+    record(deployment.capture(|| {
+        deployment
+            .issuers
+            .suspend_issuer(&hash(&deployment.env, 0x21), &deployment.issuer_id)
+    }));
+    record(deployment.capture(|| {
+        deployment
+            .issuers
+            .revoke_issuer(&hash(&deployment.env, 0x22), &deployment.issuer_id)
+    }));
+    record(deployment.capture(|| deployment.config.unpause(&hash(&deployment.env, 0x23))));
 
     assert_eq!(observed.len(), 4, "one event per step");
 
@@ -142,7 +163,7 @@ fn a_failed_step_leaves_no_gap_in_the_sequence() {
     // state transition happened between them.
     let deployment = Deployment::new();
 
-    let first = deployment.capture(|| deployment.config.pause());
+    let first = deployment.capture(|| deployment.config.pause(&hash(&deployment.env, 0x30)));
     assert_eq!(first.len(), 1);
 
     let rejected = attempt_failure(&deployment, || {
@@ -156,7 +177,7 @@ fn a_failed_step_leaves_no_gap_in_the_sequence() {
     });
     assert!(rejected.is_empty(), "the rejected step must be silent");
 
-    let last = deployment.capture(|| deployment.config.unpause());
+    let last = deployment.capture(|| deployment.config.unpause(&hash(&deployment.env, 0x31)));
     assert_eq!(last.len(), 1);
     assert!(last[0].is(&deployment.env, "unpaused"));
 }
@@ -167,7 +188,7 @@ fn cross_contract_rejection_publishes_nothing_from_either_contract() {
     // committing. A partial sequence — the callee publishing while the caller
     // rolls back — would be the hardest ghost event to diagnose.
     let deployment = Deployment::new();
-    deployment.config.pause();
+    deployment.config.pause(&hash(&deployment.env, 0x40));
     let expires = deployment.env.ledger().timestamp() + 100_000;
 
     let events = attempt_failure(&deployment, || {
@@ -238,18 +259,25 @@ fn no_event_payload_carries_protected_data() {
     let replacement = Address::generate(&deployment.env);
 
     let checks: std::vec::Vec<NamedCall> = std::vec![
-        ("pause", std::boxed::Box::new(|| deployment.config.pause())),
+        (
+            "pause",
+            std::boxed::Box::new(|| deployment.config.pause(&hash(&deployment.env, 0x50)))
+        ),
         (
             "unpause",
-            std::boxed::Box::new(|| deployment.config.unpause())
+            std::boxed::Box::new(|| deployment.config.unpause(&hash(&deployment.env, 0x51)))
         ),
         (
             "approve_schema_version",
-            std::boxed::Box::new(|| deployment.config.approve_schema_version(&6))
+            std::boxed::Box::new(|| deployment
+                .config
+                .approve_schema_version(&hash(&deployment.env, 0x52), &6))
         ),
         (
             "deprecate_schema_version",
-            std::boxed::Box::new(|| deployment.config.deprecate_schema_version(&6))
+            std::boxed::Box::new(|| deployment
+                .config
+                .deprecate_schema_version(&hash(&deployment.env, 0x53), &6))
         ),
         (
             "update_issuer",
@@ -261,11 +289,15 @@ fn no_event_payload_carries_protected_data() {
         ),
         (
             "suspend_issuer",
-            std::boxed::Box::new(|| deployment.issuers.suspend_issuer(&deployment.issuer_id))
+            std::boxed::Box::new(|| deployment
+                .issuers
+                .suspend_issuer(&hash(&deployment.env, 0x54), &deployment.issuer_id))
         ),
         (
             "reactivate_issuer",
-            std::boxed::Box::new(|| deployment.issuers.reactivate_issuer(&deployment.issuer_id))
+            std::boxed::Box::new(|| deployment
+                .issuers
+                .reactivate_issuer(&hash(&deployment.env, 0x55), &deployment.issuer_id))
         ),
         (
             "rotate_issuer_address",
@@ -277,11 +309,15 @@ fn no_event_payload_carries_protected_data() {
         ),
         (
             "revoke_issuer",
-            std::boxed::Box::new(|| deployment.issuers.revoke_issuer(&deployment.issuer_id))
+            std::boxed::Box::new(|| deployment
+                .issuers
+                .revoke_issuer(&hash(&deployment.env, 0x56), &deployment.issuer_id))
         ),
         (
             "set_admin",
-            std::boxed::Box::new(|| deployment.config.set_admin(&successor))
+            std::boxed::Box::new(|| deployment
+                .config
+                .set_admin(&hash(&deployment.env, 0x57), &successor))
         ),
     ];
 
@@ -350,11 +386,15 @@ fn no_event_is_published_by_a_contract_that_did_not_act() {
     // indexer route it to the wrong stream. Each event must name its emitter.
     let deployment = Deployment::new();
 
-    let config_events = deployment.capture(|| deployment.config.pause());
+    let config_events =
+        deployment.capture(|| deployment.config.pause(&hash(&deployment.env, 0x60)));
     assert_eq!(config_events[0].contract, deployment.config.address);
 
-    let issuer_events =
-        deployment.capture(|| deployment.issuers.suspend_issuer(&deployment.issuer_id));
+    let issuer_events = deployment.capture(|| {
+        deployment
+            .issuers
+            .suspend_issuer(&hash(&deployment.env, 0x61), &deployment.issuer_id)
+    });
     assert_eq!(issuer_events[0].contract, deployment.issuers.address);
 }
 
@@ -365,7 +405,7 @@ fn event_topics_are_single_symbol_discriminants() {
     // on topic arity would silently stop matching.
     let deployment = Deployment::new();
 
-    let events = deployment.capture(|| deployment.config.pause());
+    let events = deployment.capture(|| deployment.config.pause(&hash(&deployment.env, 0x70)));
     assert_eq!(
         events[0].topics.len(),
         1,

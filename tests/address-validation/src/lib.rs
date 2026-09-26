@@ -36,7 +36,7 @@ mod tests {
 
         client.initialize(&Address::generate(&env));
         let replacement = Address::from_str(&env, ZERO_ADDR);
-        let result = client.try_set_admin(&replacement);
+        let result = client.try_set_admin(&bytes(&env, 0x10), &replacement);
         assert_eq!(result, Err(Ok(ContractError::InvalidInput)));
     }
 
@@ -72,7 +72,7 @@ mod tests {
         let issuer_registry_id = env.register(IssuerRegistryContract, ());
         let issuer_registry = IssuerRegistryContractClient::new(&env, &issuer_registry_id);
         config.initialize(&admin);
-        config.approve_schema_version(&1);
+        config.approve_schema_version(&bytes(&env, 0x10), &1);
         issuer_registry.initialize(&admin);
         issuer_registry.register_issuer(
             &bytes(&env, 1),

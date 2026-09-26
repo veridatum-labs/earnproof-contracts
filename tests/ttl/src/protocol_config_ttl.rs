@@ -10,9 +10,13 @@ mod tests {
     use crate::harness::TtlTestHarness;
     use earnproof_shared::TTL_THRESHOLD_LEDGERS;
     use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
-    use soroban_sdk::{testutils::storage::Instance, Address, Env};
+    use soroban_sdk::{testutils::storage::Instance, Address, BytesN, Env};
 
     const ADMIN: &str = "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR";
+
+    fn bytes(env: &Env, value: u8) -> BytesN<32> {
+        BytesN::from_array(env, &[value; 32])
+    }
 
     fn admin_addr(env: &Env) -> Address {
         Address::from_str(env, ADMIN)
@@ -101,7 +105,7 @@ mod tests {
         let env = Env::default();
         let (client, _admin) = setup(&env);
 
-        client.approve_schema_version(&7);
+        client.approve_schema_version(&bytes(&env, 0x10), &7);
         assert!(client.is_schema_version_approved(&7));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
@@ -121,7 +125,7 @@ mod tests {
         let env = Env::default();
         let (client, _admin) = setup(&env);
 
-        client.approve_schema_version(&8);
+        client.approve_schema_version(&bytes(&env, 0x10), &8);
         assert!(client.is_schema_version_approved(&8));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
@@ -143,7 +147,7 @@ mod tests {
         let env = Env::default();
         let (client, _admin) = setup(&env);
 
-        client.approve_schema_version(&9);
+        client.approve_schema_version(&bytes(&env, 0x10), &9);
         assert!(client.is_schema_version_approved(&9));
 
         let current_ledger = TtlTestHarness::current_ledger(&env);
@@ -169,7 +173,7 @@ mod tests {
         let env = Env::default();
         let (client, _admin) = setup(&env);
 
-        client.approve_schema_version(&10);
+        client.approve_schema_version(&bytes(&env, 0x10), &10);
         let current_ledger = TtlTestHarness::current_ledger(&env);
         let expiry =
             TtlTestHarness::calculate_expiry(current_ledger, TTL_THRESHOLD_LEDGERS, 500_000);
@@ -178,7 +182,7 @@ mod tests {
         TtlTestHarness::advance_to_ledger(&env, post_expiry);
 
         // Re-approving after the expiry boundary succeeds and the schema is approved.
-        client.approve_schema_version(&10);
+        client.approve_schema_version(&bytes(&env, 0x11), &10);
         assert!(client.is_schema_version_approved(&10));
     }
 
@@ -191,7 +195,7 @@ mod tests {
         let v1 = client.get_config_version();
         assert_eq!(v1, 1);
 
-        client.pause();
+        client.pause(&bytes(&env, 0x12));
         let v2 = client.get_config_version();
         assert_eq!(v2, 2);
 

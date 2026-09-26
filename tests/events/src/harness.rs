@@ -121,7 +121,7 @@ impl Deployment<'_> {
         let config_id = env.register(ProtocolConfigContract, ());
         let config = ProtocolConfigContractClient::new(&env, &config_id);
         config.initialize(&admin);
-        config.approve_schema_version(&APPROVED_SCHEMA);
+        config.approve_schema_version(&hash(&env, 0xFF), &APPROVED_SCHEMA);
 
         let issuers_id = env.register(IssuerRegistryContract, ());
         let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);

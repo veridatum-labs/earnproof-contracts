@@ -93,14 +93,15 @@ impl Deployment<'_> {
             (&admin,).into_val(&env),
         );
         config.initialize(&admin);
+        let schema_proposal = proposal_id_hash(&env, 0xFE);
         authorize(
             &env,
             &admin,
             &config_id,
             "approve_schema_version",
-            (&APPROVED_SCHEMA,).into_val(&env),
+            (&schema_proposal, &APPROVED_SCHEMA).into_val(&env),
         );
-        config.approve_schema_version(&APPROVED_SCHEMA);
+        config.approve_schema_version(&schema_proposal, &APPROVED_SCHEMA);
 
         // issuer-registry: initialize + register two active issuers.
         let issuer_id = issuer_id_hash(&env, 1);
@@ -213,25 +214,27 @@ impl Deployment<'_> {
     /// rotation scenarios need. Each method installs the auth entry for the
     /// signer the contract is documented to demand.
     pub fn set_admin(&self, new_admin: &Address) {
+        let proposal_id = proposal_id_hash(&self.env, 0xFD);
         authorize(
             &self.env,
             &self.admin,
             &self.config_address,
             "set_admin",
-            (new_admin,).into_val(&self.env),
+            (&proposal_id, new_admin).into_val(&self.env),
         );
-        self.config.set_admin(new_admin);
+        self.config.set_admin(&proposal_id, new_admin);
     }
 
     pub fn suspend_issuer(&self, issuer_id: &BytesN<32>) {
+        let proposal_id = proposal_id_hash(&self.env, 0xFC);
         authorize(
             &self.env,
             &self.admin,
             &self.issuers_address,
             "suspend_issuer",
-            (issuer_id,).into_val(&self.env),
+            (&proposal_id, issuer_id).into_val(&self.env),
         );
-        self.issuers.suspend_issuer(issuer_id);
+        self.issuers.suspend_issuer(&proposal_id, issuer_id);
     }
 
     pub fn rotate_issuer_address(&self, issuer_id: &BytesN<32>, new_address: &Address) {
@@ -365,4 +368,8 @@ pub fn hash(env: &Env, discriminator: u8) -> BytesN<32> {
 /// scenario mixing the two cannot accidentally collide.
 pub fn issuer_id_hash(env: &Env, discriminator: u8) -> BytesN<32> {
     hash(env, 0x80 | discriminator)
+}
+
+pub fn proposal_id_hash(env: &Env, discriminator: u8) -> BytesN<32> {
+    hash(env, 0x40 | discriminator)
 }

@@ -151,7 +151,7 @@ mod tests {
         client.initialize(&admin);
         env.cost_estimate().budget().reset_unlimited();
 
-        client.pause();
+        client.pause(&bytes(&env, 0x10));
 
         assert_budget(
             &env,
@@ -172,7 +172,7 @@ mod tests {
         client.initialize(&admin);
         env.cost_estimate().budget().reset_unlimited();
 
-        client.approve_schema_version(&1);
+        client.approve_schema_version(&bytes(&env, 0x10), &1);
 
         assert_budget(
             &env,
@@ -319,7 +319,7 @@ mod tests {
         client.register_issuer(&issuer_id, &issuer_address, &metadata_hash, &metadata_hash);
         env.cost_estimate().budget().reset_unlimited();
 
-        client.suspend_issuer(&issuer_id);
+        client.suspend_issuer(&bytes(&env, 0x10), &issuer_id);
 
         assert_budget(
             &env,
@@ -344,7 +344,7 @@ mod tests {
         client.register_issuer(&issuer_id, &issuer_address, &metadata_hash, &metadata_hash);
         env.cost_estimate().budget().reset_unlimited();
 
-        client.revoke_issuer(&issuer_id);
+        client.revoke_issuer(&bytes(&env, 0x10), &issuer_id);
 
         assert_budget(
             &env,
@@ -408,7 +408,7 @@ mod tests {
         let issuer_id = bytes(env, 9);
 
         protocol_client.initialize(&admin);
-        protocol_client.approve_schema_version(&1);
+        protocol_client.approve_schema_version(&bytes(env, 0x10), &1);
         issuer_client.initialize(&admin);
         issuer_client.register_issuer(&issuer_id, &issuer, &bytes(env, 8), &bytes(env, 99));
         proof_client.initialize(&admin, &issuer_registry_id, &protocol_config_id);

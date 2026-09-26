@@ -12,9 +12,9 @@
 
 use super::support::{
     address_issuer_key, address_ttl_key, admin_key, bytes32, config_version_key,
-    contract_version_key, deployment, encoded, encoded_keys_in, instance_live_until_key,
-    issuer_key, issuer_registry_key, issuer_ttl_key, paused_key, proof_key, protocol_config_key,
-    schema_version_key,
+    contract_version_key, deployment, encoded, encoded_keys_in, executed_proposal_key,
+    instance_live_until_key, issuer_key, issuer_registry_key, issuer_ttl_key, paused_key,
+    proof_key, protocol_config_key, schema_version_key,
 };
 use earnproof_shared::StorageClass;
 use soroban_sdk::testutils::Address as _;
@@ -47,7 +47,20 @@ fn reconstructed_keys_match_the_keys_the_contracts_write() {
 
     assert_eq!(
         encoded_keys_in(env, &deployment.config_id, StorageClass::Persistent),
-        sorted(std::vec![encoded(env, schema_version_key(env, 1)),]),
+        sorted(std::vec![
+            encoded(env, schema_version_key(env, 1)),
+            encoded(
+                env,
+                executed_proposal_key(
+                    env,
+                    &earnproof_shared::proposal_domain_key(
+                        env,
+                        soroban_sdk::Symbol::new(env, "protocol_config"),
+                        &bytes32(env, 0x10),
+                    ),
+                ),
+            ),
+        ]),
         "protocol-config persistent keys"
     );
 

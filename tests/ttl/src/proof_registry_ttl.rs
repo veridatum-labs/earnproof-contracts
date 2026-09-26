@@ -40,7 +40,7 @@ mod tests {
         let protocol_config_client = ProtocolConfigContractClient::new(env, &protocol_config_id);
         let admin = admin_addr(env);
         protocol_config_client.initialize(&admin);
-        protocol_config_client.approve_schema_version(&1);
+        protocol_config_client.approve_schema_version(&bytes(env, 0x10), &1);
 
         let issuer_registry_id = env.register(IssuerRegistryContract, ());
         let issuer_registry_client = IssuerRegistryContractClient::new(env, &issuer_registry_id);

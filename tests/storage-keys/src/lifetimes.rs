@@ -101,22 +101,24 @@ fn per_record_namespaces_hold_one_entry_per_record() {
 
     // Three issuers, each with a record and a reverse-index entry. The rotated
     // address replaces the old index entry rather than adding to it, so the
-    // count is six and not seven.
+    // count is twelve including one TTL tracker for every record and reverse
+    // index; the rotated address and its tracker replace their old entries.
+    // Three issuers (records + TTL trackers + address entries + TTL trackers) plus allowed WASM, upgrade history, upgrade approval metadata.
     assert_eq!(
         keys_in(env, &deployment.issuers_id, StorageClass::Persistent).len(),
+        17
+    );
+
+    // Two proofs (plus TTL trackers), one archived (replacing Proof with ArchivedProof), plus upgrade history, allowed WASM, upgrade approval metadata.
+    assert_eq!(
+        keys_in(env, &deployment.proofs_id, StorageClass::Persistent).len(),
         9
     );
 
-    // Two proofs registered, one archived (which replaces Proof key with ArchivedProof), plus pause, upgrade history, allowed WASM.
-    assert_eq!(
-        keys_in(env, &deployment.proofs_id, StorageClass::Persistent).len(),
-        5
-    );
-
-    // Two schema versions, one approved and one deprecated, plus pause, upgrade history, allowed WASM.
+    // Two schema versions (plus TTL trackers and SchemaRecord), plus upgrade history, allowed WASM, upgrade approval metadata, scoped pause.
     assert_eq!(
         keys_in(env, &deployment.config_id, StorageClass::Persistent).len(),
-        5
+        11
     );
 }
 

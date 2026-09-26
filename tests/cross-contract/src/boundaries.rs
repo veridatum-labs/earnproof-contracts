@@ -417,10 +417,7 @@ fn an_inactive_issuer_is_rejected_after_both_protocol_config_checks() {
         deployment.expiry(),
     );
 
-    assert_eq!(
-        rejection,
-        Rejection::Typed(ProofError::InvalidSchemaVersion)
-    );
+    assert_eq!(rejection, Rejection::Typed(ProofError::IssuerInactive));
 }
 
 // ---------------------------------------------------------------------------

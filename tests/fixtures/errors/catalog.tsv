@@ -22,3 +22,7 @@
 303	ProofExpired	ProofError	proof-registry	returned	after-caller-change	400
 304	InvalidSchemaVersion	ProofError	proof-registry	returned	after-operator-action	400
 305	SchemaVersionNotApproved	ProofError	proof-registry	returned	after-operator-action	400
+307	ContractPaused	ProofError	proof-registry	returned	after-operator-action	503
+308	IssuerInactive	ProofError	proof-registry	returned	after-operator-action	403
+309	UnsupportedSchema	ProofError	proof-registry	reserved	after-operator-action	400
+310	MalformedInput	ProofError	proof-registry	reserved	after-caller-change	400

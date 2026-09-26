@@ -57,8 +57,27 @@ pub fn contract_version_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "ContractVersion"),)
 }
 
+pub fn instance_live_until_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "InstanceLiveUntil"),)
+}
+
 pub fn schema_version_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaVersion"), version)
+}
+
+pub fn schema_record_key(env: &Env, version: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "SchemaRecord"), version)
+}
+
+pub fn protocol_config_version_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "ProtocolConfigVersion"),)
+}
+
+pub fn issuer_registry_version_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "IssuerRegistryVersion"),)
+}
+pub fn schema_ttl_key(env: &Env, version: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "SchemaTtl"), version)
 }
 
 pub fn issuer_registry_key(env: &Env) -> (Symbol,) {
@@ -73,12 +92,24 @@ pub fn issuer_key(id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (symbol_short!("Issuer"), id.clone())
 }
 
+pub fn issuer_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "IssuerTtl"), id.clone())
+}
+
 pub fn address_issuer_key(env: &Env, address: &Address) -> (Symbol, Address) {
     (Symbol::new(env, "AddressIssuer"), address.clone())
 }
 
+pub fn address_ttl_key(env: &Env, address: &Address) -> (Symbol, Address) {
+    (Symbol::new(env, "AddressTtl"), address.clone())
+}
+
 pub fn proof_key(id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (symbol_short!("Proof"), id.clone())
+}
+
+pub fn proof_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofTtl"), id.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +237,8 @@ pub fn exercised_deployment() -> Deployment {
     let wasm_hash_config = bytes32(&env, 0x91);
     let pending_config = bytes32(&env, 0x94);
     config.approve_upgrade(&wasm_hash_config, &2);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + earnproof_shared::UPGRADE_TIMELOCK_LEDGERS);
     config.upgrade_contract(&wasm_hash_config);
     config.approve_upgrade(&pending_config, &3);
     config.set_admin(&rotated_admin);
@@ -226,6 +259,8 @@ pub fn exercised_deployment() -> Deployment {
     let wasm_hash_issuers = bytes32(&env, 0x92);
     let pending_issuers = bytes32(&env, 0x95);
     issuers.approve_upgrade(&wasm_hash_issuers, &2);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + earnproof_shared::UPGRADE_TIMELOCK_LEDGERS);
     issuers.upgrade_contract(&wasm_hash_issuers);
     issuers.approve_upgrade(&pending_issuers, &3);
 
@@ -253,8 +288,16 @@ pub fn exercised_deployment() -> Deployment {
     let wasm_hash_proofs = bytes32(&env, 0x93);
     let pending_proofs = bytes32(&env, 0x96);
     proofs.approve_upgrade(&wasm_hash_proofs, &2);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + earnproof_shared::UPGRADE_TIMELOCK_LEDGERS);
     proofs.upgrade_contract(&wasm_hash_proofs);
     proofs.approve_upgrade(&pending_proofs, &3);
+
+    config.pause();
+
+    config.begin_migration(&3, &1);
+    issuers.begin_migration(&3, &1);
+    proofs.begin_migration(&3, &1);
 
     Deployment {
         env,

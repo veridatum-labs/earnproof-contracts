@@ -268,6 +268,8 @@ pub enum ProofError {
     /// Distinct from unsupported schema — the input itself is invalid.
     /// Recovery: validate input against the schema before resubmitting.
     MalformedInput = 310,
+    /// The proof type is not supported by the protocol.
+    UnsupportedProofType = 311,
 }
 
 #[contracttype]
@@ -342,6 +344,7 @@ pub struct ProofRecord {
     pub expires_at: u64,
     pub created_at: u64,
     pub revoked_at: u64,
+    pub proof_type: Option<BytesN<32>>,
 }
 
 #[contracttype]

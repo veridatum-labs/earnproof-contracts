@@ -58,18 +58,14 @@ address→issuer mapping without scanning storage. An indexer that ignores
 
 ### `proof-registry`
 
-**This contract emits no events.**
+| Topic | Emitted by | Payload |
+|---|---|---|
+| `consent_receipt_committed` | `commit_disclosure_consent` | `proof_id_hash`, `policy_hash`, `receipt_version`, `commitment_hash` |
 
-Proof registration and revocation change on-chain state without announcing it.
-An indexer waiting for a `proof_registered` event will wait forever; proof state
-must be read with `get_proof`, `is_valid_proof`, and `is_revoked`.
-
-This is a **known gap**, recorded in
-[`tests/fixtures/events/proof-registry/v1/events.json`](../tests/fixtures/events/proof-registry/v1/events.json)
-and tracked as
-[#3](https://github.com/veridatum-labs/earnproof-contracts/issues/3). It is
-asserted rather than assumed — `proof_registry_emits_no_events_as_documented`
-fails if an event is ever added without updating the fixture and this document.
+Consent commitments are indexed in persistent storage and also emitted for
+indexers. The event does not include the receipt hash input, verifier identity,
+or disclosed claims. Proof registration and revocation remain silent; proof
+state is read with `get_proof`, `is_valid_proof`, and `is_revoked`.
 
 ### Silent entry points
 
@@ -79,7 +75,7 @@ Not every mutation emits. These do not, and the omission is deliberate:
 |---|---|---|
 | `issuer-registry` | `initialize` | Only `protocol-config` announces initialization. An indexer keying deployment off an event should watch that contract. |
 | `proof-registry` | `initialize` | As above. |
-| `proof-registry` | `register_proof`, `revoke_proof`, `admin_revoke_proof` | See the known gap above. |
+| `proof-registry` | `register_proof`, `revoke_proof`, `admin_revoke_proof` | Proof state remains queryable; these existing operations stay silent. |
 
 ## Topic naming
 

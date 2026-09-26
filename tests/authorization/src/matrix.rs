@@ -600,6 +600,64 @@ fn matrix() -> std::vec::Vec<Case> {
             },
         },
         Case {
+            name: "proof-registry::commit_disclosure_consent",
+            uninitialized: false,
+            setup: register_fixture_proof,
+            call: |d, identity| {
+                let proof_id = hash(&d.env, FIXTURE_PROOF);
+                let policy_hash = hash(&d.env, 0x12);
+                let receipt_version = 1_u32;
+                let receipt_hash = hash(&d.env, 0x13);
+                let args: soroban_sdk::Vec<Val> =
+                    (&proof_id, &policy_hash, &receipt_version, &receipt_hash).into_val(&d.env);
+                match identity {
+                    Identity::Missing => d
+                        .proofs
+                        .try_commit_disclosure_consent(
+                            &proof_id,
+                            &policy_hash,
+                            &receipt_version,
+                            &receipt_hash,
+                        )
+                        .is_ok(),
+                    Identity::Wrong => {
+                        authorize(
+                            &d.env,
+                            &d.second_issuer,
+                            &d.proofs_address,
+                            "commit_disclosure_consent",
+                            args.clone(),
+                        );
+                        d.proofs
+                            .try_commit_disclosure_consent(
+                                &proof_id,
+                                &policy_hash,
+                                &receipt_version,
+                                &receipt_hash,
+                            )
+                            .is_ok()
+                    }
+                    Identity::Authorized => {
+                        authorize(
+                            &d.env,
+                            &d.issuer,
+                            &d.proofs_address,
+                            "commit_disclosure_consent",
+                            args,
+                        );
+                        d.proofs
+                            .try_commit_disclosure_consent(
+                                &proof_id,
+                                &policy_hash,
+                                &receipt_version,
+                                &receipt_hash,
+                            )
+                            .is_ok()
+                    }
+                }
+            },
+        },
+        Case {
             name: "proof-registry::admin_revoke_proof",
             uninitialized: false,
             setup: register_fixture_proof,
@@ -640,7 +698,7 @@ fn matrix() -> std::vec::Vec<Case> {
 /// Guards against a mutating entry point being added without a documented
 /// authorization expectation. Bump only together with
 /// `docs/authorization-matrix.md`.
-const DOCUMENTED_MUTATIONS: usize = 17;
+const DOCUMENTED_MUTATIONS: usize = 18;
 
 #[test]
 fn matrix_covers_every_mutating_public_function() {
@@ -746,4 +804,8 @@ fn read_only_entry_points_require_no_authorization() {
     assert!(deployment.proofs.try_get_proof(&proof_id).is_ok());
     assert!(deployment.proofs.try_is_valid_proof(&proof_id).is_ok());
     assert!(deployment.proofs.try_is_revoked(&proof_id).is_ok());
+    assert!(deployment
+        .proofs
+        .try_has_consent_receipt_commitment(&hash(&deployment.env, 0x99))
+        .is_ok());
 }

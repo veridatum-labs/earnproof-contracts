@@ -39,7 +39,7 @@ This document describes the test suite for the TypeScript contract bindings.
   - Include regeneration instructions
 
 - **API Surface Coverage (2 tests)**
-  - 31 parameter interfaces exported
+  - 33 parameter interfaces exported
   - 31 result type aliases exported
 
 - **Determinism (3 tests)**

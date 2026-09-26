@@ -56,3 +56,9 @@ name = "fuzz_entry_point_register_proof"
 path = "fuzz_targets/fuzz_entry_point_register_proof.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_entry_point_commit_disclosure_consent"
+path = "fuzz_targets/fuzz_entry_point_commit_disclosure_consent.rs"
+test = false
+doc = false

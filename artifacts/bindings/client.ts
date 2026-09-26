@@ -108,6 +108,10 @@ import type {
   IsValidProofResult,
   IsRevokedParams,
   IsRevokedResult,
+  CommitDisclosureConsentParams,
+  CommitDisclosureConsentResult,
+  HasConsentReceiptCommitmentParams,
+  HasConsentReceiptCommitmentResult,
   GetAdminProofRegistryParams,
   GetAdminProofRegistryResult,
   GetIssuerRegistryParams,
@@ -798,6 +802,42 @@ export class EarnProofClient {
       this.config.proofRegistryId,
       "is_revoked",
       [nativeToScVal(this.hexToBytes(params.proof_id_hash), { type: "bytes" })],
+      (val) => scValToNative(val) as boolean
+    );
+  }
+
+  /**
+   * Commit a salted disclosure-consent receipt hash for an active proof.
+   * Requires authorization from the proof's registered issuer.
+   */
+  async commitDisclosureConsent(
+    params: CommitDisclosureConsentParams
+  ): Promise<CommitDisclosureConsentResult> {
+    return this.invoke(
+      this.proofRegistry,
+      this.config.proofRegistryId,
+      "commit_disclosure_consent",
+      [
+        nativeToScVal(this.hexToBytes(params.proof_id_hash), { type: "bytes" }),
+        nativeToScVal(this.hexToBytes(params.policy_hash), { type: "bytes" }),
+        nativeToScVal(params.receipt_version, { type: "u32" }),
+        nativeToScVal(this.hexToBytes(params.receipt_hash), { type: "bytes" }),
+      ],
+      (val) => this.bytesToHex(scValToNative(val) as Uint8Array)
+    );
+  }
+
+  /**
+   * Check whether a consent commitment is indexed by the proof registry.
+   */
+  async hasConsentReceiptCommitment(
+    params: HasConsentReceiptCommitmentParams
+  ): Promise<HasConsentReceiptCommitmentResult> {
+    return this.invoke(
+      this.proofRegistry,
+      this.config.proofRegistryId,
+      "has_consent_receipt_commitment",
+      [nativeToScVal(this.hexToBytes(params.commitment_hash), { type: "bytes" })],
       (val) => scValToNative(val) as boolean
     );
   }

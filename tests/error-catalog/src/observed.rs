@@ -218,6 +218,24 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
         &1,
         &FAR_FUTURE,
     );
+    let policy_hash = bytes32(env, 70);
+    let receipt_version = 1_u32;
+    let receipt_hash = bytes32(env, 71);
+    initial_dep.proofs.commit_disclosure_consent(
+        &proof_id,
+        &policy_hash,
+        &receipt_version,
+        &receipt_hash,
+    );
+    observed.record(
+        "proof-registry duplicate consent receipt commitment",
+        code(initial_dep.proofs.try_commit_disclosure_consent(
+            &proof_id,
+            &policy_hash,
+            &receipt_version,
+            &receipt_hash,
+        )),
+    );
     observed.record(
         "proof-registry duplicate proof id",
         code(initial_dep.proofs.try_register_proof(

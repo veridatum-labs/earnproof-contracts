@@ -76,6 +76,10 @@ import type {
   IsValidProofResult,
   IsRevokedParams,
   IsRevokedResult,
+  CommitDisclosureConsentParams,
+  CommitDisclosureConsentResult,
+  HasConsentReceiptCommitmentParams,
+  HasConsentReceiptCommitmentResult,
   GetAdminProofRegistryParams,
   GetAdminProofRegistryResult,
   GetIssuerRegistryParams,
@@ -551,6 +555,24 @@ describe('Contract Bindings', () => {
       expect(typeof result).toBe('boolean');
     });
 
+    it('consent commitment params and result types compile', () => {
+      const params: CommitDisclosureConsentParams = {
+        proof_id_hash: testHash,
+        policy_hash: testHash,
+        receipt_version: 1,
+        receipt_hash: testHash,
+      };
+      const result: CommitDisclosureConsentResult = testHash;
+      const lookupParams: HasConsentReceiptCommitmentParams = {
+        commitment_hash: result,
+      };
+      const lookupResult: HasConsentReceiptCommitmentResult = true;
+
+      expect(params.receipt_version).toBe(1);
+      expect(lookupParams.commitment_hash).toBe(result);
+      expect(lookupResult).toBe(true);
+    });
+
     it('get_admin params and result types compile', () => {
       const params: GetAdminProofRegistryParams = {};
       const result: GetAdminProofRegistryResult = testAddress;
@@ -656,7 +678,7 @@ describe('Contract Bindings', () => {
   // ────────────────────────────────────────────────────────────
 
   describe('API surface coverage', () => {
-    it('types.ts exports 31 parameter interfaces', () => {
+    it('types.ts exports 33 parameter interfaces', () => {
       // This documents that all 31 contract functions have parameter types
       const paramTypes = [
         'InitializeProtocolConfigParams',
@@ -688,16 +710,18 @@ describe('Contract Bindings', () => {
         'GetProofParams',
         'IsValidProofParams',
         'IsRevokedParams',
+        'CommitDisclosureConsentParams',
+        'HasConsentReceiptCommitmentParams',
         'GetAdminProofRegistryParams',
         'GetIssuerRegistryParams',
         'GetProtocolConfigParams',
       ];
 
-      expect(paramTypes.length).toBe(33); // 31 functions + shared types
+      expect(paramTypes.length).toBe(35); // 33 functions + shared types
     });
 
-    it('types.ts exports 31 result type aliases', () => {
-      // This documents that all 31 contract functions have result types
+    it('types.ts exports 33 result type aliases', () => {
+      // This documents that all 33 contract functions have result types
       const resultTypes = [
         'InitializeProtocolConfigResult',
         'GetAdminProtocolConfigResult',
@@ -728,12 +752,14 @@ describe('Contract Bindings', () => {
         'GetProofResult',
         'IsValidProofResult',
         'IsRevokedResult',
+        'CommitDisclosureConsentResult',
+        'HasConsentReceiptCommitmentResult',
         'GetAdminProofRegistryResult',
         'GetIssuerRegistryResult',
         'GetProtocolConfigResult',
       ];
 
-      expect(resultTypes.length).toBe(31);
+      expect(resultTypes.length).toBe(33);
     });
   });
 

@@ -12,4 +12,8 @@ The canonical fixture is [vectors.json](../tests/fixtures/encoding/vectors.json)
 - `schema_version` is an unsigned 32-bit integer encoded big-endian when serialized outside Soroban. `expiration` is an unsigned 64-bit ledger timestamp, also big-endian. No signed, little-endian, truncated, or overflowing value is valid.
 - `BytesN<32>` is the digest bytes, not the ASCII bytes of its hexadecimal display.
 
+Disclosure-consent commitments use the separate, versioned Soroban XDR tuple
+specified in [consent-receipts.md](./consent-receipts.md). Do not apply the
+UTF-8 text rules above to that tuple.
+
 The fixtures contain synthetic values only. They must never be updated with wallets, credentials, secrets, deployment identifiers, income, or payment history. Run `cargo test -p encoding-vector-tests` after changing them and update the independent TypeScript example in `tests/fixtures/encoding/example.ts`.

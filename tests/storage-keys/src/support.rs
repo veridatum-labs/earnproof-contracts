@@ -113,6 +113,10 @@ pub fn proof_key(id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (symbol_short!("Proof"), id.clone())
 }
 
+pub fn consent_receipt_key(env: &Env, commitment_hash: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ConsentReceipt"), commitment_hash.clone())
+}
+
 #[allow(dead_code)]
 pub fn proof_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (Symbol::new(env, "ProofTtl"), id.clone())
@@ -271,6 +275,12 @@ pub fn exercised_deployment() -> Deployment {
         &rotated_issuer,
         &1,
         &1_000_000,
+    );
+    proofs.commit_disclosure_consent(
+        &proof_id,
+        &bytes32(&env, 30),
+        &1,
+        &bytes32(&env, 31),
     );
     proofs.register_proof(
         &bytes32(&env, 7),

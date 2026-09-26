@@ -251,12 +251,7 @@ fn rotate_issuer_address_emits_both_old_and_new_address() {
 // ─── proof-registry ─────────────────────────────────────────────────────────
 
 #[test]
-fn proof_registry_emits_no_events_as_documented() {
-    // `tests/fixtures/events/proof-registry/v1/events.json` records that this
-    // contract publishes nothing. That is the "unless explicitly documented
-    // otherwise" case, and it is asserted rather than assumed: an indexer that
-    // waited for a ProofRegistered event would wait forever, and this test is
-    // what makes that a deliberate, visible decision.
+fn proof_registration_and_revocation_remain_silent() {
     let deployment = Deployment::new();
     let events = deployment.capture(|| {
         let proof_id = deployment.register_proof(0x11);
@@ -269,8 +264,42 @@ fn proof_registry_emits_no_events_as_documented() {
 
     assert!(
         from_proof_registry.is_empty(),
-        "proof-registry is documented as emitting no events; \
-         adding one requires updating tests/fixtures/events/proof-registry/ \
-         and docs/events.md"
+        "proof registration and revocation do not emit consent events"
     );
+}
+
+#[test]
+fn consent_commitment_event_contains_only_public_hash_metadata() {
+    let deployment = Deployment::new();
+    let proof_id = deployment.register_proof(0x21);
+    let policy_hash = hash(&deployment.env, 0x22);
+    let receipt_hash = hash(&deployment.env, 0x23);
+    let mut commitment = None;
+    let events = deployment.capture(|| {
+        commitment = Some(deployment.proofs.commit_disclosure_consent(
+            &proof_id,
+            &policy_hash,
+            &1,
+            &receipt_hash,
+        ));
+    });
+    let event = expect_single(&deployment.env, &events, "consent_receipt_committed");
+    let commitment = commitment.expect("commit call returns its indexed commitment");
+
+    let announced_proof: BytesN<32> = event.field(&deployment.env, "proof_id_hash").unwrap();
+    let announced_policy: BytesN<32> = event.field(&deployment.env, "policy_hash").unwrap();
+    let announced_version: u32 = event.field(&deployment.env, "receipt_version").unwrap();
+    let announced_commitment: BytesN<32> =
+        event.field(&deployment.env, "commitment_hash").unwrap();
+
+    assert_eq!(announced_proof, proof_id);
+    assert_eq!(announced_policy, policy_hash);
+    assert_eq!(announced_version, 1);
+    assert_eq!(announced_commitment, commitment);
+    assert_eq!(event.field_count(&deployment.env), 4);
+    assert!(event.field::<BytesN<32>>(&deployment.env, "receipt_hash").is_none());
+    assert!(event.field::<Address>(&deployment.env, "verifier").is_none());
+    assert!(deployment
+        .proofs
+        .has_consent_receipt_commitment(&commitment));
 }

@@ -21,7 +21,7 @@ tests/fixtures/events/
       events.json                   No events emitted yet
   proof-registry/
     v1/
-      events.json                   No events emitted yet
+      consent-receipt-committed.json Consent commitment event
 ```
 
 ## Fixture Format

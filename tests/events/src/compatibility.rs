@@ -48,6 +48,15 @@ const DECLARED_EVENTS: &[(&str, &[&str])] = &[
         "issuer_address_rotated",
         &["issuer_id_hash", "old_address", "new_address", "updated_at"],
     ),
+    (
+        "consent_receipt_committed",
+        &[
+            "proof_id_hash",
+            "policy_hash",
+            "receipt_version",
+            "commitment_hash",
+        ],
+    ),
 ];
 
 /// Looks up the declared payload fields for a topic.
@@ -218,18 +227,11 @@ fn every_declared_event_names_at_least_one_payload_field() {
 }
 
 #[test]
-fn proof_registry_declares_no_events() {
-    // The fixture at tests/fixtures/events/proof-registry/v1/events.json records
-    // an empty event list. Adding an event to this contract must therefore fail
-    // here first, forcing the fixture and docs/events.md to be updated with it.
+fn proof_registry_declares_only_the_consent_commitment_event() {
     let emitted_by_proof_registry = DECLARED_EVENTS
         .iter()
-        .any(|(name, _)| name.starts_with("proof_"));
+        .filter(|(name, _)| name.starts_with("consent_"))
+        .count();
 
-    assert!(
-        !emitted_by_proof_registry,
-        "proof-registry is documented as emitting no events; \
-         update tests/fixtures/events/proof-registry/v1/events.json and \
-         docs/events.md before declaring one here"
-    );
+    assert_eq!(emitted_by_proof_registry, 1);
 }

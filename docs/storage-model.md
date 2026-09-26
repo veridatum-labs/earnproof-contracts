@@ -113,16 +113,18 @@ Soroban does not automatically extend TTLs. Every entry will expire and be archi
 - `initialize()`: extends on setup
 - `approve_upgrade()`, `upgrade_contract()`: extends on upgrades
 
-#### Persistent Storage (Per-Proof)
+#### Persistent Storage (Per-Proof and Consent Commitment)
 
 | Entry | DataKey | Access Pattern | Behavior on Expiry | Fail-Closed |
 |-------|---------|-----------------|-------------------|------------|
 | Proof Record | `Proof(hash)` | `get_proof(hash)` reads & extends; `is_valid_proof(hash)` reads & extends | ProofNotFound error | ✓ Yes |
+| Consent Receipt Commitment | `ConsentReceipt(commitment_hash)` | `has_consent_receipt_commitment(hash)` checks index | `false` | ✓ Yes |
 
 **Persistent TTL Extension**: Called via `extend_proof_key_ttl(key)` on:
 - `register_proof()`: extends on creation
 - `get_proof()`: extends on read (extend-on-read pattern)
 - `revoke_proof()`, `admin_revoke_proof()`: extend on revocation
+- `commit_disclosure_consent()`: stores and extends the hash-only receipt commitment
 
 ---
 

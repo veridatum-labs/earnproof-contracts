@@ -2,12 +2,13 @@
 
 #[allow(unused_imports)]
 use earnproof_shared::{
-    ContractError, MigrationStatus, PauseScope, ProofError, ProofRecord, ProofStatus, TtlStatus,
-    UpgradeApproval, UpgradeReceipt, MAX_MIGRATION_BATCH, MIGRATION_STATUS_VERSION,
-    TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
+    ContractError, GenesisRecord, MigrationStatus, PauseScope, ProofError, ProofPayloadRecord,
+    ProofRecord, ProofStatus, TtlStatus, UpgradeApproval, UpgradeReceipt, MAX_MIGRATION_BATCH,
+    MIGRATION_STATUS_VERSION, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{
-    contract, contractclient, contractevent, contractimpl, contracttype, Address, BytesN, Env,
+    contract, contractclient, contractevent, contractimpl, contracttype, Address, Bytes, BytesN,
+    Env,
 };
 
 #[contractclient(name = "ProtocolConfigContractClient")]
@@ -15,6 +16,7 @@ pub trait ProtocolConfigInterface {
     fn is_paused(env: Env) -> bool;
     fn is_scope_paused(env: Env, scope: PauseScope) -> bool;
     fn is_schema_version_approved(env: Env, version: u32) -> bool;
+    fn get_schema_payload_limit(env: Env, version: u32) -> u32;
 }
 
 #[contractclient(name = "IssuerRegistryContractClient")]
@@ -38,6 +40,14 @@ enum DataKey {
     ContractVersion,
     Successor,
     Decommissioned,
+    /// Immutable deployment identity, written once at `initialize`.
+    Genesis,
+    /// Monotonic epoch, advanced once per externally visible proof mutation
+    /// (registration, revocation, supersession, or archival change).
+    RegistryEpoch,
+    /// Bounded auxiliary-payload metadata for a proof registered with a
+    /// payload (length and commitment hash only — never the raw bytes).
+    ProofPayloadMeta(BytesN<32>),
 }
 
 // ── upgrade events ────────────────────────────────────────────────────────────
@@ -80,6 +90,38 @@ pub struct ContractDecommissioned {
     pub activated_by: Address,
 }
 
+// ── registry epoch events ────────────────────────────────────────────────────
+//
+// Every externally visible proof mutation carries the registry epoch it
+// advanced to, so a cache or indexer can invalidate on the epoch alone
+// instead of diffing individual records. Each entry point below still
+// publishes exactly one event, matching the "at most one event per
+// invocation" invariant documented in docs/events.md.
+
+/// Emitted when a proof is registered without an auxiliary payload.
+#[contractevent]
+pub struct ProofRegistered {
+    pub proof_id_hash: BytesN<32>,
+    pub epoch: u32,
+}
+
+/// Emitted when a proof is registered with an auxiliary payload.
+#[contractevent]
+pub struct ProofRegisteredWithPayload {
+    pub proof_id_hash: BytesN<32>,
+    pub payload_len: u32,
+    pub payload_hash: BytesN<32>,
+    pub epoch: u32,
+}
+
+/// Emitted when a proof is revoked, by its issuer or by the admin.
+#[contractevent]
+pub struct ProofRevoked {
+    pub proof_id_hash: BytesN<32>,
+    pub by_admin: bool,
+    pub epoch: u32,
+}
+
 #[contractimpl]
 impl ProofRegistryContract {
     pub fn is_decommissioned(env: Env) -> bool {
@@ -120,8 +162,53 @@ impl ProofRegistryContract {
         env.storage()
             .instance()
             .set(&DataKey::ContractVersion, &1_u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::RegistryEpoch, &0_u32);
+        let genesis = GenesisRecord {
+            genesis_id: earnproof_shared::compute_genesis_id(&env, "earnproof_proof_registry"),
+            initialized_at_ledger: env.ledger().sequence(),
+        };
+        env.storage().instance().set(&DataKey::Genesis, &genesis);
         Self::extend_instance_ttl(env);
         Ok(())
+    }
+
+    /// Returns the immutable genesis identity recorded at `initialize`.
+    /// Unchanged across upgrades and storage migrations.
+    pub fn get_genesis(env: Env) -> Result<GenesisRecord, ContractError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Genesis)
+            .ok_or(ContractError::NotInitialized)
+    }
+
+    /// Returns the current registry epoch: a monotonic counter advanced once
+    /// per externally visible proof mutation (registration, revocation,
+    /// supersession, or archival change). Read-only calls and failed writes
+    /// never advance it, and it survives upgrades and migrations because it
+    /// lives in the same instance storage they do not touch.
+    pub fn get_registry_epoch(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::RegistryEpoch)
+            .unwrap_or(0)
+    }
+
+    /// Returns the bounded auxiliary-payload metadata recorded for a proof
+    /// registered via `register_proof_with_payload`.
+    pub fn get_proof_payload(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+    ) -> Result<ProofPayloadRecord, ProofError> {
+        let key = DataKey::ProofPayloadMeta(proof_id_hash);
+        let record = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ProofError::ProofNotFound)?;
+        Self::extend_payload_key_ttl(env, &key);
+        Ok(record)
     }
 
     pub fn nominate_successor(env: Env, successor: Address) -> Result<(), ProofError> {
@@ -240,7 +327,7 @@ impl ProofRegistryContract {
 
         let now = env.ledger().timestamp();
         let record = ProofRecord {
-            proof_id_hash,
+            proof_id_hash: proof_id_hash.clone(),
             commitment_hash,
             issuer_address,
             status: ProofStatus::Active,
@@ -251,7 +338,112 @@ impl ProofRegistryContract {
         };
 
         env.storage().persistent().set(&key, &record);
-        Self::extend_proof_key_ttl(env, &key);
+        Self::extend_proof_key_ttl(env.clone(), &key);
+        let epoch = Self::bump_registry_epoch(&env);
+        ProofRegistered {
+            proof_id_hash,
+            epoch,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Registers a proof exactly like [`Self::register_proof`], plus an
+    /// auxiliary payload whose size is bounded by the schema's governed
+    /// limit (`ProtocolConfigContract::get_schema_payload_limit`). The bound
+    /// is enforced before any state is written. Only the payload's length
+    /// and a commitment hash are stored — never the raw bytes — so resource
+    /// use stays bounded regardless of the configured limit.
+    pub fn register_proof_with_payload(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        commitment_hash: BytesN<32>,
+        issuer_address: Address,
+        schema_version: u32,
+        expires_at: u64,
+        payload: Bytes,
+    ) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        Self::require_valid_issuer_address(&issuer_address)?;
+        let protocol_config =
+            Self::get_protocol_config(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        let issuer_registry =
+            Self::get_issuer_registry(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        if issuer_address == env.current_contract_address()
+            || issuer_address == protocol_config
+            || issuer_address == issuer_registry
+        {
+            return Err(ProofError::InvalidAddress);
+        }
+        Self::require_auth(&issuer_address);
+
+        if schema_version == 0 {
+            return Err(ProofError::InvalidSchemaVersion);
+        }
+
+        if expires_at <= env.ledger().timestamp() {
+            return Err(ProofError::ProofExpired);
+        }
+
+        let protocol_client = ProtocolConfigContractClient::new(&env, &protocol_config);
+        if protocol_client.is_paused() {
+            return Err(ProofError::ContractPaused);
+        }
+
+        let issuer_client = IssuerRegistryContractClient::new(&env, &issuer_registry);
+        if !issuer_client.is_active_address(&issuer_address) {
+            return Err(ProofError::IssuerInactive);
+        }
+
+        if !protocol_client.is_schema_version_approved(&schema_version) {
+            return Err(ProofError::UnsupportedSchema);
+        }
+
+        // Schema-specific payload size bound, enforced before any state
+        // write — a zero-length payload is always within bounds, and a
+        // payload exactly at the limit is accepted.
+        let max_payload_size = protocol_client.get_schema_payload_limit(&schema_version);
+        let payload_len = payload.len();
+        if payload_len > max_payload_size {
+            return Err(ProofError::MalformedInput);
+        }
+
+        let key = DataKey::Proof(proof_id_hash.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(ProofError::ProofAlreadyRegistered);
+        }
+
+        let now = env.ledger().timestamp();
+        let record = ProofRecord {
+            proof_id_hash: proof_id_hash.clone(),
+            commitment_hash,
+            issuer_address,
+            status: ProofStatus::Active,
+            schema_version,
+            expires_at,
+            created_at: now,
+            revoked_at: 0,
+        };
+        env.storage().persistent().set(&key, &record);
+        Self::extend_proof_key_ttl(env.clone(), &key);
+
+        let payload_hash = env.crypto().sha256(&payload).to_bytes();
+        let payload_key = DataKey::ProofPayloadMeta(proof_id_hash.clone());
+        let payload_meta = ProofPayloadRecord {
+            payload_len,
+            payload_hash: payload_hash.clone(),
+        };
+        env.storage().persistent().set(&payload_key, &payload_meta);
+        Self::extend_payload_key_ttl(env.clone(), &payload_key);
+
+        let epoch = Self::bump_registry_epoch(&env);
+        ProofRegisteredWithPayload {
+            proof_id_hash,
+            payload_len,
+            payload_hash,
+            epoch,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -504,7 +696,14 @@ impl ProofRegistryContract {
         record.status = ProofStatus::Revoked;
         record.revoked_at = env.ledger().timestamp();
         env.storage().persistent().set(&key, &record);
-        Self::extend_proof_key_ttl(env, &key);
+        Self::extend_proof_key_ttl(env.clone(), &key);
+        let epoch = Self::bump_registry_epoch(&env);
+        ProofRevoked {
+            proof_id_hash,
+            by_admin,
+            epoch,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -518,6 +717,30 @@ impl ProofRegistryContract {
         env.storage()
             .persistent()
             .extend_ttl(key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
+    }
+
+    fn extend_payload_key_ttl(env: Env, key: &DataKey) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
+    }
+
+    /// Advances the registry epoch by exactly one and returns the new value.
+    /// Only ever called from a success path, after the mutation it
+    /// summarizes has already been committed, so a failed call or a
+    /// cross-contract rejection never advances it.
+    ///
+    /// Deliberately does not call `extend_instance_ttl`: proof-registry's
+    /// documented TTL policy is that only `initialize` extends the instance
+    /// entry, so per-call restoration cost stays flat regardless of traffic.
+    /// See `docs/storage-ttl.md`.
+    fn bump_registry_epoch(env: &Env) -> u32 {
+        let current = Self::get_registry_epoch(env.clone());
+        let next = current
+            .checked_add(1)
+            .unwrap_or_else(|| panic!("registry epoch overflow: reached maximum"));
+        env.storage().instance().set(&DataKey::RegistryEpoch, &next);
+        next
     }
 
     pub fn get_migration_status(env: Env) -> Option<MigrationStatus> {
@@ -1756,5 +1979,298 @@ mod test {
         assert!(pc_client.is_paused());
         pc_client.unpause();
         assert!(!pc_client.is_paused());
+    }
+
+    // ── genesis identity (issue #192) ────────────────────────────────────────
+
+    #[test]
+    fn genesis_is_recorded_at_initialization() {
+        let (env, client, ..) = setup();
+        let genesis = client.get_genesis();
+        assert_ne!(genesis.genesis_id, BytesN::from_array(&env, &[0u8; 32]));
+        assert_eq!(genesis.initialized_at_ledger, env.ledger().sequence());
+    }
+
+    #[test]
+    fn genesis_is_unchanged_across_an_upgrade() {
+        let (env, client, ..) = setup();
+        let genesis_before = client.get_genesis();
+
+        let hash = bytes(&env, 0x66);
+        client.approve_upgrade(&hash, &2);
+        client.upgrade_contract(&hash);
+
+        assert_eq!(client.get_genesis(), genesis_before);
+    }
+
+    #[test]
+    fn get_genesis_fails_before_initialization() {
+        let env = Env::default();
+        let contract_id = env.register(ProofRegistryContract, ());
+        let client = ProofRegistryContractClient::new(&env, &contract_id);
+        use earnproof_shared::ContractError;
+
+        let result = client.try_get_genesis();
+        assert_eq!(result, Err(Ok(ContractError::NotInitialized)));
+    }
+
+    #[test]
+    fn genesis_differs_from_a_second_independent_deployment() {
+        // Two independently-initialized proof-registry instances must not
+        // share a genesis identity, even with the same admin/dependencies.
+        let (env, client, protocol_config, issuer_registry, issuer_registry_id) = setup();
+        let _ = &protocol_config;
+        let _ = &issuer_registry;
+
+        let second_id = env.register(ProofRegistryContract, ());
+        let second = ProofRegistryContractClient::new(&env, &second_id);
+        second.initialize(
+            &Address::from_str(&env, ADMIN),
+            &issuer_registry_id,
+            &client.get_protocol_config(),
+        );
+
+        assert_ne!(
+            client.get_genesis().genesis_id,
+            second.get_genesis().genesis_id
+        );
+    }
+
+    // ── registry epoch (issue #187) ───────────────────────────────────────────
+
+    #[test]
+    fn registry_epoch_starts_at_zero() {
+        let (_env, client, ..) = setup();
+        assert_eq!(client.get_registry_epoch(), 0);
+    }
+
+    #[test]
+    fn register_proof_advances_the_epoch_by_one() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+
+        client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
+        assert_eq!(client.get_registry_epoch(), 1);
+
+        client.register_proof(&bytes(&env, 3), &bytes(&env, 4), &issuer, &1, &2_000);
+        assert_eq!(client.get_registry_epoch(), 2);
+    }
+
+    #[test]
+    fn revoke_proof_advances_the_epoch() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let proof_id = bytes(&env, 1);
+
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        assert_eq!(client.get_registry_epoch(), 1);
+
+        client.revoke_proof(&proof_id);
+        assert_eq!(client.get_registry_epoch(), 2);
+    }
+
+    #[test]
+    fn admin_revoke_proof_advances_the_epoch() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let proof_id = bytes(&env, 1);
+
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        client.admin_revoke_proof(&proof_id);
+        assert_eq!(client.get_registry_epoch(), 2);
+    }
+
+    #[test]
+    fn a_rejected_registration_does_not_advance_the_epoch() {
+        let (env, client, protocol_config, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        protocol_config.pause();
+
+        let result =
+            client.try_register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
+        assert!(result.is_err());
+        assert_eq!(client.get_registry_epoch(), 0);
+    }
+
+    #[test]
+    fn a_double_revocation_does_not_advance_the_epoch_twice() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let proof_id = bytes(&env, 1);
+
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        client.revoke_proof(&proof_id);
+        let epoch_after_first_revocation = client.get_registry_epoch();
+
+        let result = client.try_revoke_proof(&proof_id);
+        assert!(result.is_err());
+        assert_eq!(client.get_registry_epoch(), epoch_after_first_revocation);
+    }
+
+    #[test]
+    fn epoch_overflow_panics_explicitly() {
+        let (env, client, ..) = setup();
+        env.as_contract(&client.address, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::RegistryEpoch, &u32::MAX);
+        });
+
+        let issuer = Address::from_str(&env, ISSUER);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_epoch_survives_an_upgrade() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &2_000);
+        let epoch_before = client.get_registry_epoch();
+
+        let hash = bytes(&env, 0x88);
+        client.approve_upgrade(&hash, &2);
+        client.upgrade_contract(&hash);
+
+        assert_eq!(client.get_registry_epoch(), epoch_before);
+    }
+
+    // ── schema-specific payload size limits (issue #190) ─────────────────────
+
+    #[test]
+    fn register_proof_with_payload_accepts_a_zero_length_payload() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let proof_id = bytes(&env, 1);
+
+        client.register_proof_with_payload(
+            &proof_id,
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &soroban_sdk::Bytes::new(&env),
+        );
+
+        let payload = client.get_proof_payload(&proof_id);
+        assert_eq!(payload.payload_len, 0);
+        assert!(client.is_valid_proof(&proof_id));
+    }
+
+    #[test]
+    fn register_proof_with_payload_accepts_a_payload_exactly_at_the_limit() {
+        let (env, client, protocol_config, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        protocol_config.set_schema_payload_limit(&1, &8);
+
+        let payload_bytes = soroban_sdk::Bytes::from_array(&env, &[0xAB; 8]);
+        client.register_proof_with_payload(
+            &bytes(&env, 1),
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &payload_bytes,
+        );
+
+        let payload = client.get_proof_payload(&bytes(&env, 1));
+        assert_eq!(payload.payload_len, 8);
+        assert_eq!(
+            payload.payload_hash,
+            env.crypto().sha256(&payload_bytes).to_bytes()
+        );
+    }
+
+    #[test]
+    fn register_proof_with_payload_rejects_a_payload_one_byte_over_the_limit() {
+        let (env, client, protocol_config, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        protocol_config.set_schema_payload_limit(&1, &8);
+
+        let result = client.try_register_proof_with_payload(
+            &bytes(&env, 1),
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &soroban_sdk::Bytes::from_array(&env, &[0xAB; 9]),
+        );
+        assert_eq!(result, Err(Ok(ProofError::MalformedInput)));
+    }
+
+    #[test]
+    fn register_proof_with_payload_uses_the_default_limit_when_unset() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+
+        let ok_payload = soroban_sdk::Bytes::from_array(
+            &env,
+            &[0u8; earnproof_shared::DEFAULT_SCHEMA_PAYLOAD_LIMIT as usize],
+        );
+        client.register_proof_with_payload(
+            &bytes(&env, 1),
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &ok_payload,
+        );
+        assert!(client.is_valid_proof(&bytes(&env, 1)));
+
+        let over_payload = soroban_sdk::Bytes::from_array(
+            &env,
+            &[0u8; (earnproof_shared::DEFAULT_SCHEMA_PAYLOAD_LIMIT + 1) as usize],
+        );
+        let result = client.try_register_proof_with_payload(
+            &bytes(&env, 3),
+            &bytes(&env, 4),
+            &issuer,
+            &1,
+            &2_000,
+            &over_payload,
+        );
+        assert_eq!(result, Err(Ok(ProofError::MalformedInput)));
+    }
+
+    #[test]
+    fn register_proof_with_payload_rejects_a_used_deprecated_schema_the_same_as_registration_without_payload(
+    ) {
+        let (env, client, protocol_config, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        protocol_config.deprecate_schema_version(&1);
+
+        let result = client.try_register_proof_with_payload(
+            &bytes(&env, 1),
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &soroban_sdk::Bytes::new(&env),
+        );
+        assert_eq!(result, Err(Ok(ProofError::UnsupportedSchema)));
+    }
+
+    #[test]
+    fn a_rejected_payload_registration_writes_nothing() {
+        let (env, client, protocol_config, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        protocol_config.set_schema_payload_limit(&1, &4);
+        let proof_id = bytes(&env, 1);
+
+        let result = client.try_register_proof_with_payload(
+            &proof_id,
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &soroban_sdk::Bytes::from_array(&env, &[0xAB; 5]),
+        );
+        assert!(result.is_err());
+        assert!(!client.is_valid_proof(&proof_id));
+        assert_eq!(client.get_registry_epoch(), 0);
+        let payload_result = client.try_get_proof_payload(&proof_id);
+        assert_eq!(payload_result, Err(Ok(ProofError::ProofNotFound)));
     }
 }

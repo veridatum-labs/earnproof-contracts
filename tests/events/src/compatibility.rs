@@ -9,7 +9,7 @@
 //! the fixtures usable as a compatibility contract for indexers rather than
 //! documentation that happened to be true once.
 
-use crate::harness::{hash, read_events, Deployment, ObservedEvent};
+use crate::harness::{hash, read_events, Deployment, ObservedEvent, APPROVED_SCHEMA};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, Symbol, TryFromVal, Val};
 
@@ -48,6 +48,9 @@ const DECLARED_EVENTS: &[(&str, &[&str])] = &[
         "issuer_address_rotated",
         &["issuer_id_hash", "old_address", "new_address", "updated_at"],
     ),
+    // proof-registry
+    ("proof_registered", &["proof_id_hash", "epoch"]),
+    ("proof_revoked", &["proof_id_hash", "by_admin", "epoch"]),
 ];
 
 /// Looks up the declared payload fields for a topic.
@@ -218,18 +221,29 @@ fn every_declared_event_names_at_least_one_payload_field() {
 }
 
 #[test]
-fn proof_registry_declares_no_events() {
-    // The fixture at tests/fixtures/events/proof-registry/v1/events.json records
-    // an empty event list. Adding an event to this contract must therefore fail
-    // here first, forcing the fixture and docs/events.md to be updated with it.
-    let emitted_by_proof_registry = DECLARED_EVENTS
-        .iter()
-        .any(|(name, _)| name.starts_with("proof_"));
+fn proof_registry_events_match_their_fixtures() {
+    // proof-registry used to emit nothing; issue #187 added `proof_registered`
+    // and `proof_revoked`, each fixtured under
+    // tests/fixtures/events/proof-registry/v1/. This is the live-emission side
+    // of that fixture contract, mirroring the protocol-config and
+    // issuer-registry checks above.
+    let deployment = Deployment::new();
+    let proof_id = hash(&deployment.env, 0x51);
+    let expires_at = deployment.env.ledger().timestamp() + 100_000;
 
-    assert!(
-        !emitted_by_proof_registry,
-        "proof-registry is documented as emitting no events; \
-         update tests/fixtures/events/proof-registry/v1/events.json and \
-         docs/events.md before declaring one here"
-    );
+    for event in deployment.capture(|| {
+        deployment.proofs.register_proof(
+            &proof_id,
+            &hash(&deployment.env, 0x52),
+            &deployment.issuer,
+            &APPROVED_SCHEMA,
+            &expires_at,
+        )
+    }) {
+        assert_matches_fixture(&deployment.env, &event);
+    }
+
+    for event in deployment.capture(|| deployment.proofs.revoke_proof(&proof_id)) {
+        assert_matches_fixture(&deployment.env, &event);
+    }
 }

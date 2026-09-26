@@ -58,18 +58,37 @@ address→issuer mapping without scanning storage. An indexer that ignores
 
 ### `proof-registry`
 
-**This contract emits no events.**
+| Topic | Emitted by | Payload |
+|---|---|---|
+| `proof_registered` | `register_proof` | `proof_id_hash`, `epoch` |
+| `proof_revoked` | `revoke_proof`, `admin_revoke_proof` | `proof_id_hash`, `by_admin`, `epoch` |
 
-Proof registration and revocation change on-chain state without announcing it.
-An indexer waiting for a `proof_registered` event will wait forever; proof state
-must be read with `get_proof`, `is_valid_proof`, and `is_revoked`.
+Both events carry `epoch`: the registry epoch (see
+[Registry epoch](#registry-epoch) below) *after* the mutation committed. A
+cache or indexer may invalidate on that value alone instead of diffing
+individual records. Neither event carries the commitment hash, issuer, schema
+version, or expiration — those are read back with `get_proof`.
 
-This is a **known gap**, recorded in
-[`tests/fixtures/events/proof-registry/v1/events.json`](../tests/fixtures/events/proof-registry/v1/events.json)
+This closes what was previously a **known gap** — proof-registry emitted
+nothing at all — recorded in
+[`tests/fixtures/events/proof-registry/v1/`](../tests/fixtures/events/proof-registry/v1/)
 and tracked as
-[#3](https://github.com/veridatum-labs/earnproof-contracts/issues/3). It is
-asserted rather than assumed — `proof_registry_emits_no_events_as_documented`
-fails if an event is ever added without updating the fixture and this document.
+[#3](https://github.com/veridatum-labs/earnproof-contracts/issues/3).
+`register_proof_with_payload` (see below) additionally publishes
+`proof_registered_with_payload`, which carries `payload_len` and
+`payload_hash` alongside `proof_id_hash` and `epoch`.
+
+#### Registry epoch
+
+`RegistryEpoch` is a monotonic `u32` counter, private to proof-registry,
+advanced by exactly one on every externally visible proof mutation
+(registration, including with a payload, and revocation). It starts at `0` at
+`initialize` and is exposed by `get_registry_epoch`. A read-only call or a
+rejected write never advances it — including a rejection reached through a
+cross-contract check in protocol-config or issuer-registry — so polling
+`get_registry_epoch` is a cheap way to detect "something changed" without
+diffing every record. Overflow past `u32::MAX` panics explicitly rather than
+wrapping.
 
 ### Silent entry points
 
@@ -79,7 +98,6 @@ Not every mutation emits. These do not, and the omission is deliberate:
 |---|---|---|
 | `issuer-registry` | `initialize` | Only `protocol-config` announces initialization. An indexer keying deployment off an event should watch that contract. |
 | `proof-registry` | `initialize` | As above. |
-| `proof-registry` | `register_proof`, `revoke_proof`, `admin_revoke_proof` | See the known gap above. |
 
 ## Topic naming
 

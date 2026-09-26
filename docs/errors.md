@@ -103,7 +103,7 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 307 | `ContractPaused` | `ProofError` | proof-registry | returned | after-operator-action | 503 |
 | 308 | `IssuerInactive` | `ProofError` | proof-registry | returned | after-operator-action | 403 |
 | 309 | `UnsupportedSchema` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
-| 310 | `MalformedInput` | `ProofError` | proof-registry | reserved | after-caller-change | 400 |
+| 310 | `MalformedInput` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
 
 ## Details
 
@@ -375,10 +375,10 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 
 - Enum: `ProofError`
 - Domain: proof-registry
-- Status: reserved
+- Status: returned
 - Retry: after-caller-change
-- Cause: Reserved for when proof input data fails format or size validation. No contract path currently returns this code; it is allocated so the code is never reused for a different meaning.
-- Remediation: Validate the proof input data against the schema before resubmitting. Ensure all required fields are present and data sizes conform to the schema limits.
+- Cause: register_proof_with_payload was given an auxiliary payload larger than the schema's governed limit (protocol-config's get_schema_payload_limit for that version).
+- Remediation: Call get_schema_payload_limit for the schema version and shrink the payload to fit, or use register_proof without a payload if none is required.
 - Suggested HTTP status: 400
 - Client message: "Malformed proof input"
 

@@ -317,7 +317,10 @@ fn rotating_the_config_admin_does_not_move_registry_authority() {
     );
     assert!(deployment
         .issuers
-        .try_suspend_issuer(&deployment.issuer_id)
+        .try_suspend_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32])
+        )
         .is_err());
     deployment.assert_no_side_effects(&before, "config admin on suspend_issuer");
 

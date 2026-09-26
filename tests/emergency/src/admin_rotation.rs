@@ -231,7 +231,10 @@ fn issuer_containment_requires_the_issuer_registry_admin() {
     let issuer_id = crate::harness::issuer_id_hash(&deployment.env, 1);
 
     deployment.config.pause();
-    deployment.issuers.suspend_issuer(&issuer_id);
+    deployment.issuers.suspend_issuer(
+        &issuer_id,
+        &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+    );
 
     assert_authorized_by(
         &deployment,
@@ -271,13 +274,19 @@ fn a_revoked_issuer_cannot_be_reactivated_after_the_incident() {
     let issuer_id = crate::harness::issuer_id_hash(&deployment.env, 1);
 
     deployment.config.pause();
-    deployment.issuers.revoke_issuer(&issuer_id);
+    deployment.issuers.revoke_issuer(
+        &issuer_id,
+        &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+    );
     deployment.config.unpause();
 
     assert!(
         deployment
             .issuers
-            .try_reactivate_issuer(&issuer_id)
+            .try_reactivate_issuer(
+                &issuer_id,
+                &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32])
+            )
             .is_err(),
         "revocation must survive the end of the pause"
     );
@@ -293,7 +302,10 @@ fn a_revoked_issuer_cannot_register_new_proofs_after_unpause() {
     let issuer_id = crate::harness::issuer_id_hash(&deployment.env, 1);
 
     deployment.config.pause();
-    deployment.issuers.revoke_issuer(&issuer_id);
+    deployment.issuers.revoke_issuer(
+        &issuer_id,
+        &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+    );
     deployment.config.unpause();
 
     assert!(

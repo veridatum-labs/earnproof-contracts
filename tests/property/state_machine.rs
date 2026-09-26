@@ -99,9 +99,9 @@ proptest! {
 
             let before = client.get_issuer(&issuer_id);
             let success = try_op(&env, || match op_kind {
-                0 => { client.suspend_issuer(&issuer_id); }
-                1 => { client.reactivate_issuer(&issuer_id); }
-                _ => { client.revoke_issuer(&issuer_id); }
+                0 => { client.suspend_issuer(&issuer_id, &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32])); }
+                1 => { client.reactivate_issuer(&issuer_id, &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32])); }
+                _ => { client.revoke_issuer(&issuer_id, &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32])); }
             });
             prop_assert_eq!(success, expected_success, "iteration {}", i);
 

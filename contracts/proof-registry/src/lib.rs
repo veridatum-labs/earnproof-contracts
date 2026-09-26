@@ -841,7 +841,10 @@ mod test {
             &bytes(&env, 11),
             &bytes(&env, 99),
         );
-        issuer_registry.suspend_issuer(&bytes(&env, 10));
+        issuer_registry.suspend_issuer(
+            &bytes(&env, 10),
+            &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]),
+        );
 
         let result = client.try_register_proof(
             &bytes(&env, 1),

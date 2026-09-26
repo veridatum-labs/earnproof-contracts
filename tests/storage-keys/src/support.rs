@@ -65,23 +65,28 @@ pub fn schema_version_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaVersion"), version)
 }
 
+#[allow(dead_code)]
 pub fn schema_record_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaRecord"), version)
 }
 
+#[allow(dead_code)]
 pub fn protocol_config_version_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "ProtocolConfigVersion"),)
 }
 
-pub fn issuer_registry_version_key(env: &Env) -> (Symbol,) {
-    (Symbol::new(env, "IssuerRegistryVersion"),)
-}
+#[allow(dead_code)]
 pub fn schema_ttl_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaTtl"), version)
 }
 
 pub fn issuer_registry_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "IssuerRegistry"),)
+}
+
+#[allow(dead_code)]
+pub fn issuer_registry_version_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "IssuerRegistryVersion"),)
 }
 
 pub fn protocol_config_key(env: &Env) -> (Symbol,) {
@@ -108,6 +113,7 @@ pub fn proof_key(id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (symbol_short!("Proof"), id.clone())
 }
 
+#[allow(dead_code)]
 pub fn proof_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (Symbol::new(env, "ProofTtl"), id.clone())
 }
@@ -190,7 +196,7 @@ pub fn deployment() -> Deployment {
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
-    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2));
+    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2), &bytes32(&env, 99));
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
@@ -246,13 +252,23 @@ pub fn exercised_deployment() -> Deployment {
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
-    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2));
+    issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2), &bytes32(&env, 99));
     issuers.update_issuer(&issuer_id, &bytes32(&env, 3));
     issuers.rotate_issuer_address(&issuer_id, &rotated_issuer);
-    issuers.register_issuer(&bytes32(&env, 10), &suspended_issuer, &bytes32(&env, 11));
+    issuers.register_issuer(
+        &bytes32(&env, 10),
+        &suspended_issuer,
+        &bytes32(&env, 11),
+        &bytes32(&env, 99),
+    );
     issuers.suspend_issuer(&bytes32(&env, 10));
     issuers.reactivate_issuer(&bytes32(&env, 10));
-    issuers.register_issuer(&bytes32(&env, 20), &revoked_issuer, &bytes32(&env, 21));
+    issuers.register_issuer(
+        &bytes32(&env, 20),
+        &revoked_issuer,
+        &bytes32(&env, 21),
+        &bytes32(&env, 99),
+    );
     issuers.revoke_issuer(&bytes32(&env, 20));
     issuers.pause_scope(&earnproof_shared::PauseScope::Update);
     issuers.unpause_scope(&earnproof_shared::PauseScope::Update);
@@ -261,7 +277,7 @@ pub fn exercised_deployment() -> Deployment {
     issuers.approve_upgrade(&wasm_hash_issuers, &2);
     env.ledger()
         .set_sequence_number(env.ledger().sequence() + earnproof_shared::UPGRADE_TIMELOCK_LEDGERS);
-    issuers.upgrade_contract(&wasm_hash_issuers);
+    issuers.upgrade_contract(&wasm_hash_issuers, &2);
     issuers.approve_upgrade(&pending_issuers, &3);
 
     let proofs_id = env.register(ProofRegistryContract, ());
@@ -298,6 +314,12 @@ pub fn exercised_deployment() -> Deployment {
     config.begin_migration(&3, &1);
     issuers.begin_migration(&3, &1);
     proofs.begin_migration(&3, &1);
+
+    let successor = Address::generate(&env);
+    config.pause_scope(&earnproof_shared::PauseScope::Upgrades);
+
+    issuers.nominate_successor(&successor);
+    issuers.activate_successor();
 
     Deployment {
         env,

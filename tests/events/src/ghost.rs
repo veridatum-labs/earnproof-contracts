@@ -40,6 +40,7 @@ fn duplicate_issuer_id_emits_no_event() {
             &hash(&deployment.env, 0x01),
             &other,
             &hash(&deployment.env, 0xDD),
+            &hash(&deployment.env, 0x99),
         );
     });
 
@@ -56,6 +57,7 @@ fn duplicate_issuer_address_emits_no_event() {
             &hash(&deployment.env, 0x09),
             &existing_address,
             &hash(&deployment.env, 0xDD),
+            &hash(&deployment.env, 0x99),
         );
     });
 
@@ -258,9 +260,12 @@ fn rotating_to_a_taken_address_emits_no_event() {
     let deployment = Deployment::new();
     let second_id = hash(&deployment.env, 0x02);
     let second_address = Address::generate(&deployment.env);
-    deployment
-        .issuers
-        .register_issuer(&second_id, &second_address, &hash(&deployment.env, 0xBB));
+    deployment.issuers.register_issuer(
+        &second_id,
+        &second_address,
+        &hash(&deployment.env, 0xBB),
+        &hash(&deployment.env, 0x99),
+    );
 
     let events = attempt_failure(&deployment, || {
         // Rotating the first issuer onto the second issuer's address.

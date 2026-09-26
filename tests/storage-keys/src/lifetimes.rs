@@ -118,7 +118,7 @@ fn per_record_namespaces_hold_one_entry_per_record() {
     // Two schema versions (plus TTL trackers and SchemaRecord), plus upgrade history, allowed WASM, upgrade approval metadata, scoped pause.
     assert_eq!(
         keys_in(env, &deployment.config_id, StorageClass::Persistent).len(),
-        11
+        12
     );
 }
 

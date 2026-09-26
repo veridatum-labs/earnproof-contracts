@@ -404,7 +404,7 @@ pub const ERROR_CATALOG: [ErrorSpec; 25] = [
         status: Status::Returned,
         cause: "The schema version is non-zero but is not approved in protocol-config, either because it was never approved or because it was deprecated.",
         retry: Retry::AfterOperatorAction,
-        remediation: "A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns this code, because no version can be approved there.",
+        remediation: "A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns UnsupportedSchema (309).",
         http_status: 400,
         client_message: "Schema version not approved",
     },

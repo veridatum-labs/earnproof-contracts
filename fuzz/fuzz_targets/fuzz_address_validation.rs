@@ -47,7 +47,10 @@ fuzz_target!(|data: &[u8]| {
     );
     let _ = is_zero_or_sentinel_address(&addr_all_a);
 
-    // Pattern 2: Too short (should be rejected)
+    // Pattern 2: Empty (should be rejected)
+    let _ = lossy_str.is_empty();
+
+    // Pattern 3: Too short (should be rejected)
     let too_short = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // 32 chars
     if too_short.len() != 56 {
         // Expected: rejected

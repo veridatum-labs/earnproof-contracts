@@ -47,7 +47,12 @@ impl Deployment<'_> {
         let issuers_id = env.register(IssuerRegistryContract, ());
         let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
         issuers.initialize(&admin);
-        issuers.register_issuer(&issuer_id_hash(&env, 1), &issuer, &hash(&env, 0xAA));
+        issuers.register_issuer(
+            &issuer_id_hash(&env, 1),
+            &issuer,
+            &hash(&env, 0xAA),
+            &hash(&env, 0x99),
+        );
 
         let proofs_id = env.register(ProofRegistryContract, ());
         let proofs = ProofRegistryContractClient::new(&env, &proofs_id);

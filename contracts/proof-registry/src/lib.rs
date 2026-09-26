@@ -1115,7 +1115,12 @@ mod test {
         protocol_config_client.initialize(&admin);
         protocol_config_client.approve_schema_version(&1);
         issuer_registry_client.initialize(&admin);
-        issuer_registry_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        issuer_registry_client.register_issuer(
+            &issuer_id,
+            &issuer,
+            &bytes(&env, 8),
+            &bytes(&env, 99),
+        );
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
 
         (
@@ -1230,7 +1235,12 @@ mod test {
             &env,
             "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
         );
-        issuer_registry.register_issuer(&bytes(&env, 10), &inactive_issuer, &bytes(&env, 11));
+        issuer_registry.register_issuer(
+            &bytes(&env, 10),
+            &inactive_issuer,
+            &bytes(&env, 11),
+            &bytes(&env, 99),
+        );
         issuer_registry.suspend_issuer(&bytes(&env, 10));
 
         let result = client.try_register_proof(
@@ -1324,7 +1334,7 @@ mod test {
         pc_client.initialize(&admin);
         pc_client.approve_schema_version(&1);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
 
         let hash = BytesN::from_array(&env, &[0xde; 32]);
@@ -1960,7 +1970,7 @@ mod test {
         assert!(pc_client.is_schema_version_approved(&1));
 
         // Step 4: Register an issuer in issuer-registry
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         assert!(ir_client.is_active_address(&issuer));
 
         // Step 5: Deploy and initialize proof-registry with both dependencies
@@ -2039,7 +2049,7 @@ mod test {
         let ir_id = env.register(IssuerRegistryContract, ());
         let ir_client = IssuerRegistryContractClient::new(&env, &ir_id);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
 
         // Deploy proof-registry
         let proof_id = env.register(ProofRegistryContract, ());
@@ -2096,7 +2106,7 @@ mod test {
         let ir_client = IssuerRegistryContractClient::new(&env, &ir_id);
         ir_client.initialize(&admin);
         let issuer_id = bytes(&env, 9);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
 
         // Now proof registration should work because dependencies are initialized
         let proof_id_hash = bytes(&env, 1);
@@ -2155,7 +2165,7 @@ mod test {
 
         // Now register the issuer and everything should work
         let issuer_id = bytes(&env, 9);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
 
         proof_client.register_proof(&bytes(&env, 3), &bytes(&env, 4), &issuer, &1, &2_000);
         assert!(proof_client.is_valid_proof(&bytes(&env, 3)));
@@ -2187,7 +2197,7 @@ mod test {
         let ir_id = env.register(IssuerRegistryContract, ());
         let ir_client = IssuerRegistryContractClient::new(&env, &ir_id);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         assert!(ir_client.is_active_address(&issuer));
 
         // Initialize proof-registry third (depends on both above)
@@ -2229,7 +2239,12 @@ mod test {
             "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
         );
         let new_issuer_id = bytes(&env, 99);
-        ir_client.register_issuer(&new_issuer_id, &new_issuer, &bytes(&env, 88));
+        ir_client.register_issuer(
+            &new_issuer_id,
+            &new_issuer,
+            &bytes(&env, 88),
+            &bytes(&env, 99),
+        );
         assert!(ir_client.is_active_issuer(&new_issuer_id));
 
         // Verify admin can still perform admin operations
@@ -2289,7 +2304,12 @@ mod test {
             &env,
             "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
         );
-        issuer_registry.register_issuer(&bytes(&env, 15), &inactive_issuer, &bytes(&env, 16));
+        issuer_registry.register_issuer(
+            &bytes(&env, 15),
+            &inactive_issuer,
+            &bytes(&env, 16),
+            &bytes(&env, 99),
+        );
         issuer_registry.suspend_issuer(&bytes(&env, 15));
 
         let result = client.try_register_proof(
@@ -2404,7 +2424,7 @@ mod test {
         pc.initialize(&admin);
         pc.approve_schema_version(&1);
         ir.initialize(&admin);
-        ir.register_issuer(&bytes(&env, 9), &issuer, &bytes(&env, 8));
+        ir.register_issuer(&bytes(&env, 9), &issuer, &bytes(&env, 8), &bytes(&env, 99));
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
 
         // Now remove all auths so the issuer's require_auth() will abort.
@@ -2432,7 +2452,12 @@ mod test {
             &env,
             "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
         );
-        issuer_registry.register_issuer(&bytes(&env, 17), &inactive_issuer, &bytes(&env, 18));
+        issuer_registry.register_issuer(
+            &bytes(&env, 17),
+            &inactive_issuer,
+            &bytes(&env, 18),
+            &bytes(&env, 99),
+        );
         issuer_registry.suspend_issuer(&bytes(&env, 17));
 
         let result = client.try_register_proof(
@@ -2458,7 +2483,12 @@ mod test {
             &env,
             "GBXHUHG5FGYLPD6RHL2MKWMP572O6KUXCZXDZJXS4T57ZTMAKBN7DWXN",
         );
-        issuer_registry.register_issuer(&bytes(&env, 19), &inactive_issuer, &bytes(&env, 20));
+        issuer_registry.register_issuer(
+            &bytes(&env, 19),
+            &inactive_issuer,
+            &bytes(&env, 20),
+            &bytes(&env, 99),
+        );
         issuer_registry.suspend_issuer(&bytes(&env, 19));
 
         let result = client.try_register_proof(
@@ -2546,7 +2576,12 @@ mod upgrade_timelock_tests {
         protocol_config_client.initialize(&admin);
         protocol_config_client.approve_schema_version(&1);
         issuer_registry_client.initialize(&admin);
-        issuer_registry_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        issuer_registry_client.register_issuer(
+            &issuer_id,
+            &issuer,
+            &bytes(&env, 8),
+            &bytes(&env, 99),
+        );
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
 
         (env, client, admin)
@@ -2895,7 +2930,7 @@ mod upgrade_timelock_tests {
         pc_client.initialize(&admin);
         pc_client.approve_schema_version(&1);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
         env.set_auths(&[]);
 
@@ -2924,7 +2959,7 @@ mod upgrade_timelock_tests {
         pc_client.initialize(&admin);
         pc_client.approve_schema_version(&1);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
         client.approve_upgrade(&make_wasm_hash(&env), &2);
         env.set_auths(&[]);
@@ -2954,7 +2989,7 @@ mod upgrade_timelock_tests {
         pc_client.initialize(&admin);
         pc_client.approve_schema_version(&1);
         ir_client.initialize(&admin);
-        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8));
+        ir_client.register_issuer(&issuer_id, &issuer, &bytes(&env, 8), &bytes(&env, 99));
         client.initialize(&admin, &issuer_registry_id, &protocol_config_id);
         client.approve_upgrade(&make_wasm_hash(&env), &2);
         env.set_auths(&[]);

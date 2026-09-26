@@ -1,58 +1,23 @@
-//! The authoritative inventory of on-chain storage namespaces.
-//!
-//! Each contract keeps its own private `DataKey` enum, which is what actually
-//! addresses ledger entries. This module is the reviewed description of those
-//! enums: one entry per `DataKey` variant, recording which contract owns it,
-//! how many payload fields it carries, which durability class it belongs to,
-//! what it stores, and who is responsible for it.
-//!
-//! The inventory is not decorative. `tests/storage-keys/` drives a full
-//! lifecycle across all three contracts and compares the namespaces that
-//! actually appear in instance, persistent, and temporary storage against
-//! [`STORAGE_NAMESPACES`]. A new `DataKey` variant, a renamed one, or one
-//! written to the wrong durability class fails that comparison.
-//!
-//! ## Why namespaces cannot collide
-//!
-//! A `#[contracttype]` enum encodes as a vector whose first element is the
-//! variant name as a `Symbol` and whose remaining elements are the payload
-//! fields in declaration order. Two consequences follow, and both are asserted
-//! in `tests/storage-keys/`:
-//!
-//! * Two variants with different names never produce the same key, whatever
-//!   their payloads, because the discriminant symbol differs in the first
-//!   position. There is no concatenation step in which a payload could be
-//!   mistaken for a discriminant.
-//! * Two variants with the same name and different arity never produce the
-//!   same key, because the encoded vectors have different lengths.
-//!
-//! Ledger keys are additionally scoped by contract address, so the same
-//! namespace name in two different contracts addresses two different entries.
-//!
-//! See [`docs/storage.md`](../../../docs/storage.md) for the prose version of
-//! this inventory, including the rules for adding a namespace.
+// Storage key namespace catalog for the Earnproof protocol contracts.
+//
+// Every `DataKey` enum variant across every contract in this workspace MUST be
+// inventoried here. The inventory is used by storage-key property tests to
+// verify key encoding determinism, collision freedom, durability tiers, and
+// namespace exclusivity across contracts.
 
-/// Durability class of a storage entry.
-///
-/// The three classes are not interchangeable. Instance entries share one
-/// lifetime with the contract itself and are read on nearly every call, so
-/// they suit small configuration values. Persistent entries carry an
-/// independent per-key lifetime and suit records that must outlive any single
-/// deployment concern. Temporary entries cannot be restored once they expire,
-/// which makes them unsuitable for anything a verifier may need later.
+/// Durability tier of a storage entry.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StorageClass {
-    /// Shares the contract instance lifetime.
+    /// Stored in instance storage (moves with contract instance).
     Instance,
-    /// Independent per-key lifetime, restorable after archival.
+    /// Stored in persistent storage (rent-bearing, independent lifecycle).
     Persistent,
-    /// Independent per-key lifetime, unrecoverable after expiry.
+    /// Stored in temporary storage (short TTL, cleared on expiry).
     Temporary,
 }
 
 impl StorageClass {
-    /// Stable lower-case name, used in generated documentation and tests.
-    pub const fn as_str(self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             StorageClass::Instance => "instance",
             StorageClass::Persistent => "persistent",
@@ -64,29 +29,31 @@ impl StorageClass {
 /// One `DataKey` variant.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct StorageNamespace {
-    /// Crate name of the owning contract, as it appears under `contracts/`.
+    /// Contract that owns this namespace.
     pub contract: &'static str,
-    /// The `DataKey` variant name, which is the discriminant symbol that
-    /// appears first in the encoded key.
+    /// Name of the `DataKey` enum variant.
     pub namespace: &'static str,
-    /// Number of payload fields the variant carries. The encoded key is a
-    /// vector of `arity + 1` elements.
+    /// Number of payload arguments in the `DataKey` variant.
+    ///
+    /// Singletons are 0; per-record entries are 1; composite keys are 2+.
     pub arity: u32,
-    /// Durability class the contract writes this key to.
+    /// Durability tier in Soroban storage.
     pub class: StorageClass,
-    /// Rust type stored under the key.
+    /// Type of value stored under this key (e.g. `"Address"`, `"IssuerRecord"`).
     pub value: &'static str,
-    /// Role accountable for the entry existing and staying live.
+    /// Human-readable party that creates or mutates entries under this key.
     pub owner: &'static str,
 }
 
-/// Every storage namespace in the deployment, ordered by contract and then by
-/// namespace name.
+pub const CONTRACTS: [&str; 3] = ["issuer-registry", "proof-registry", "protocol-config"];
+
+/// Inventory of every storage namespace across every contract, sorted by
+/// `(contract, namespace)`.
 ///
 /// Adding a row here is the second half of adding a storage key; the first is
 /// adding the `DataKey` variant. Doing one without the other fails the tests in
 /// `tests/storage-keys/`.
-pub const STORAGE_NAMESPACES: [StorageNamespace; 54] = [
+pub const STORAGE_NAMESPACES: [StorageNamespace; 56] = [
     StorageNamespace {
         contract: "issuer-registry",
         namespace: "AddressIssuer",
@@ -137,6 +104,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 54] = [
     },
     StorageNamespace {
         contract: "issuer-registry",
+        namespace: "Decommissioned",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "bool",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
         namespace: "InstanceLiveUntil",
         arity: 0,
         class: StorageClass::Instance,
@@ -182,6 +157,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 54] = [
         class: StorageClass::Persistent,
         value: "bool",
         owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
+        namespace: "Successor",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "Address",
+        owner: "registry operator",
     },
     StorageNamespace {
         contract: "issuer-registry",
@@ -521,10 +504,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 54] = [
     },
 ];
 
-/// The three contracts covered by [`STORAGE_NAMESPACES`].
-pub const CONTRACTS: [&str; 3] = ["issuer-registry", "proof-registry", "protocol-config"];
+/// Looks up a namespace entry by contract and namespace name.
+pub fn namespace(contract: &str, namespace: &str) -> Option<StorageNamespace> {
+    STORAGE_NAMESPACES
+        .into_iter()
+        .find(|entry| entry.contract == contract && entry.namespace == namespace)
+}
 
-/// Returns the namespaces owned by `contract` in the given durability class.
+/// Iterates over every namespace declared for a contract.
 pub fn namespaces_for<'a>(
     contract: &'a str,
     class: StorageClass,
@@ -533,11 +520,4 @@ pub fn namespaces_for<'a>(
         .into_iter()
         .filter(move |entry| entry.contract == contract && entry.class == class)
         .map(|entry| entry.namespace)
-}
-
-/// Looks up a single namespace.
-pub fn namespace(contract: &str, name: &str) -> Option<StorageNamespace> {
-    STORAGE_NAMESPACES
-        .into_iter()
-        .find(|entry| entry.contract == contract && entry.namespace == name)
 }

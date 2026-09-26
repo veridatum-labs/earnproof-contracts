@@ -1,6 +1,6 @@
 # scenario: initialized
-# revision: 6
-# reason: Issue #170/174/176/177 governance upgrade and timelock enforcement
+# revision: 8
+# reason: merge upstream develop
 # body-digest: da50e9087cbd6aea4f15454753026acad252096836858568bbf3d8eb9a8f4ebb
 
 [ledger]

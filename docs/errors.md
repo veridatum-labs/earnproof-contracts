@@ -334,7 +334,7 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Status: returned
 - Retry: after-operator-action
 - Cause: The schema version is non-zero but is not approved in protocol-config, either because it was never approved or because it was deprecated.
-- Remediation: A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns this code, because no version can be approved there.
+- Remediation: A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns UnsupportedSchema (309).
 - Suggested HTTP status: 400
 - Client message: "Schema version not approved"
 

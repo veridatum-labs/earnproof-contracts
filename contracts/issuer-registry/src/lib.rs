@@ -27,7 +27,9 @@ enum DataKey {
     AllowedWasm(BytesN<32>),
     ContractVersion,
     CurrentWasmHash,
+    Decommissioned,
     ScopedPause(PauseScope),
+    Successor,
     UpgradeHistory(u32),
     UpgradeHistoryCount,
     MigrationStatus,
@@ -86,6 +88,7 @@ pub struct IssuerRegistered {
     pub issuer_id_hash: BytesN<32>,
     pub issuer_address: Address,
     pub metadata_hash: BytesN<32>,
+    pub provenance_commitment: BytesN<32>,
     pub created_at: u64,
 }
 
@@ -129,12 +132,40 @@ pub struct IssuerAddressRotated {
     pub updated_at: u64,
 }
 
+#[contractevent]
+pub struct SuccessorNominated {
+    pub successor: Address,
+    pub nominated_by: Address,
+}
+
+#[contractevent]
+pub struct ContractDecommissioned {
+    pub old_instance: Address,
+    pub successor_instance: Address,
+    pub activated_by: Address,
+}
+
 // ---------------------------------------------------------------------------
 // Contract implementation
 // ---------------------------------------------------------------------------
 
 #[contractimpl]
 impl IssuerRegistryContract {
+    pub fn is_decommissioned(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Decommissioned)
+            .unwrap_or(false)
+    }
+
+    fn ensure_not_decommissioned(env: &Env) -> Result<(), IssuerError> {
+        if Self::is_decommissioned(env.clone()) {
+            Err(IssuerError::InvalidTransition)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
@@ -208,13 +239,91 @@ impl IssuerRegistryContract {
         Ok(())
     }
 
+    pub fn nominate_successor(env: Env, successor: Address) -> Result<(), IssuerError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let admin = Self::get_admin(env.clone()).map_err(|_| IssuerError::IssuerNotFound)?;
+        Self::require_valid_issuer_address(&successor)?;
+        Self::require_auth(&admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Successor, &successor);
+        SuccessorNominated {
+            successor: successor.clone(),
+            nominated_by: admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    pub fn get_successor(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Successor)
+    }
+
+    pub fn activate_successor(env: Env) -> Result<(), IssuerError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let admin = Self::get_admin(env.clone()).map_err(|_| IssuerError::IssuerNotFound)?;
+        Self::require_auth(&admin);
+        let successor: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Successor)
+            .ok_or(IssuerError::IssuerNotFound)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Decommissioned, &true);
+        ContractDecommissioned {
+            old_instance: env.current_contract_address(),
+            successor_instance: successor,
+            activated_by: admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    pub fn keepalive_instance(env: Env) -> bool {
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return false;
+        }
+        Self::extend_instance_ttl(env);
+        true
+    }
+
+    pub fn keepalive_issuer(env: Env, issuer_id_hash: BytesN<32>) -> bool {
+        let key = DataKey::Issuer(issuer_id_hash);
+        if env.storage().persistent().has(&key) {
+            Self::extend_issuer_key_ttl(env, &key);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn keepalive_address_issuer(env: Env, issuer_address: Address) -> bool {
+        let key = DataKey::AddressIssuer(issuer_address);
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(
+                &key,
+                TTL_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn register_issuer(
         env: Env,
         issuer_id_hash: BytesN<32>,
         issuer_address: Address,
         metadata_hash: BytesN<32>,
+        provenance_commitment: BytesN<32>,
     ) -> Result<(), IssuerError> {
         Self::assert_operational(&env);
+        if provenance_commitment == BytesN::from_array(&env, &[0u8; 32]) {
+            return Err(IssuerError::InvalidAddress);
+        }
         let admin = Self::get_admin(env.clone()).map_err(|_| IssuerError::IssuerNotFound)?;
         if Self::is_scope_paused(env.clone(), PauseScope::Registration) {
             return Err(IssuerError::IssuerInactive);
@@ -237,6 +346,7 @@ impl IssuerRegistryContract {
             issuer_id_hash: issuer_id_hash.clone(),
             issuer_address: issuer_address.clone(),
             metadata_hash: metadata_hash.clone(),
+            provenance_commitment: provenance_commitment.clone(),
             status: IssuerStatus::Active,
             created_at: now,
             updated_at: now,
@@ -253,10 +363,19 @@ impl IssuerRegistryContract {
             issuer_id_hash,
             issuer_address,
             metadata_hash,
+            provenance_commitment,
             created_at: now,
         }
         .publish(&env);
         Ok(())
+    }
+
+    pub fn get_provenance_commitment(
+        env: Env,
+        issuer_id_hash: BytesN<32>,
+    ) -> Result<BytesN<32>, IssuerError> {
+        let record = Self::get_issuer(env, issuer_id_hash)?;
+        Ok(record.provenance_commitment)
     }
 
     pub fn update_issuer(
@@ -544,14 +663,16 @@ impl IssuerRegistryContract {
         Ok(Self::get_instance_ttl_status(env))
     }
 
-    /// Admin-only: add `wasm_hash` to the upgrade allowlist.
     /// Admin-only: add `wasm_hash` to the upgrade allowlist and record the
     /// `new_version` that must be installed by that WASM.
+    ///
+    /// Records an upgrade approval with timelock and expiry.
     pub fn approve_upgrade(
         env: Env,
         wasm_hash: BytesN<32>,
         new_version: u32,
     ) -> Result<(), ContractError> {
+        Self::assert_operational(&env);
         let admin = Self::get_admin(env.clone()).map_err(|_| ContractError::NotInitialized)?;
         Self::require_auth(&admin);
         if Self::is_scope_paused(env.clone(), PauseScope::Upgrade) {
@@ -625,6 +746,7 @@ impl IssuerRegistryContract {
 
     /// Admin-only: remove a hash from the allowlist without applying it.
     pub fn revoke_upgrade(env: Env, wasm_hash: BytesN<32>) -> Result<(), ContractError> {
+        Self::assert_operational(&env);
         let admin = Self::get_admin(env.clone()).map_err(|_| ContractError::NotInitialized)?;
         Self::require_auth(&admin);
         if Self::is_scope_paused(env.clone(), PauseScope::Upgrade) {
@@ -704,7 +826,7 @@ impl IssuerRegistryContract {
             .storage()
             .persistent()
             .get::<DataKey, UpgradeApprovalMetadata>(&DataKey::UpgradeApprovalMetadata(
-                target_hash.clone(),
+                target_hash,
             ));
 
         match metadata {
@@ -724,9 +846,15 @@ impl IssuerRegistryContract {
         }
     }
 
-    /// Admin-only: apply an in-place WASM upgrade with invariant assertions.
-    pub fn upgrade_contract(env: Env, wasm_hash: BytesN<32>) {
-        let admin = Self::get_admin(env.clone()).expect("contract not initialized");
+    /// Admin-only: apply an in-place WASM upgrade.
+    pub fn upgrade_contract(
+        env: Env,
+        wasm_hash: BytesN<32>,
+        new_version: u32,
+    ) -> Result<(), ContractError> {
+        Self::assert_operational(&env);
+        let admin = Self::get_admin(env.clone()).map_err(|_| ContractError::NotInitialized)?;
+        let old_version = Self::get_contract_version(env.clone());
         Self::require_auth(&admin);
         if Self::is_scope_paused(env.clone(), PauseScope::Upgrade) {
             panic!("upgrade operations are paused");
@@ -737,7 +865,7 @@ impl IssuerRegistryContract {
             .storage()
             .persistent()
             .get(&key)
-            .expect("wasm hash not on allowlist");
+            .ok_or(ContractError::NoUpgradeApproval)?;
 
         let current_contract = env.current_contract_address();
         let expected_role = Symbol::new(&env, CONTRACT_ROLE);
@@ -746,13 +874,12 @@ impl IssuerRegistryContract {
             panic!("upgrade approval does not match target contract identity or role");
         }
 
-        let old_version = Self::get_contract_version(env.clone());
-        if approval.new_version <= old_version {
-            panic!("upgrade would not advance contract version");
+        if approval.new_version != new_version || new_version <= old_version {
+            return Err(ContractError::InvalidInput);
         }
 
         if let Some(status) = Self::get_migration_status(env.clone()) {
-            if !status.complete || status.target_contract_version != approval.new_version {
+            if !status.complete || status.target_contract_version != new_version {
                 panic!("required storage migration is incomplete");
             }
         }
@@ -765,10 +892,10 @@ impl IssuerRegistryContract {
             if approval_timelock.wasm_hash == wasm_hash {
                 let current_ledger = env.ledger().sequence();
                 if current_ledger < approval_timelock.earliest_execution {
-                    panic!("timelock has not elapsed");
+                    return Err(ContractError::UpgradeTimelockNotElapsed);
                 }
                 if current_ledger >= approval_timelock.expires_at {
-                    panic!("upgrade approval expired");
+                    return Err(ContractError::UpgradeApprovalExpired);
                 }
             }
         }
@@ -806,7 +933,7 @@ impl IssuerRegistryContract {
 
         env.storage()
             .instance()
-            .set(&DataKey::ContractVersion, &approval.new_version);
+            .set(&DataKey::ContractVersion, &new_version);
         env.storage()
             .instance()
             .set(&DataKey::CurrentWasmHash, &wasm_hash);
@@ -816,7 +943,7 @@ impl IssuerRegistryContract {
         let receipt = UpgradeReceipt {
             wasm_hash: wasm_hash.clone(),
             old_version,
-            new_version: approval.new_version,
+            new_version,
             upgraded_at: now,
             upgraded_by: admin.clone(),
         };
@@ -837,7 +964,7 @@ impl IssuerRegistryContract {
             old_wasm_hash,
             new_wasm_hash: wasm_hash.clone(),
             old_version,
-            new_version: approval.new_version,
+            new_version,
             ledger_sequence: current_ledger,
             ledger_timestamp: now,
             upgraded_by: admin.clone(),
@@ -861,10 +988,11 @@ impl IssuerRegistryContract {
             target_contract: current_contract,
             contract_role: expected_role,
             old_contract_version: old_version,
-            new_contract_version: approval.new_version,
+            new_contract_version: new_version,
             upgraded_by: admin,
         }
         .publish(&env);
+        Ok(())
     }
 
     /// Admin-only: revoke an upgrade approval at any point in its lifetime.
@@ -931,6 +1059,9 @@ impl IssuerRegistryContract {
     }
 
     fn assert_operational(env: &Env) {
+        if Self::is_decommissioned(env.clone()) {
+            panic!("contract is decommissioned");
+        }
         if Self::get_migration_status(env.clone()).is_some_and(|status| !status.complete) {
             panic!("storage migration in progress");
         }
@@ -1071,7 +1202,7 @@ mod test {
 
     use super::{DataKey, IssuerRegistryContract, IssuerRegistryContractClient};
     use earnproof_shared::{
-        IssuerError, IssuerStatus, TTL_THRESHOLD_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
+        ContractError, IssuerError, IssuerStatus, TTL_THRESHOLD_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
     };
     use soroban_sdk::{
         testutils::{
@@ -1108,14 +1239,21 @@ mod test {
         let (env, client, _admin) = setup();
         let issuer_id = bytes(&env, 1);
         let metadata_hash = bytes(&env, 2);
+        let provenance_commitment = bytes(&env, 99);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash);
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &metadata_hash,
+            &provenance_commitment,
+        );
 
         let record = client.get_issuer(&issuer_id);
         assert_eq!(record.issuer_id_hash, issuer_id);
         assert_eq!(record.issuer_address, issuer_address);
         assert_eq!(record.metadata_hash, metadata_hash);
+        assert_eq!(record.provenance_commitment, provenance_commitment);
         assert_eq!(record.status, IssuerStatus::Active);
         assert!(client.is_active_issuer(&issuer_id));
         assert!(client.is_active_address(&issuer_address));
@@ -1127,7 +1265,12 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         client.suspend_issuer(&issuer_id);
         assert!(!client.is_active_issuer(&issuer_id));
 
@@ -1144,12 +1287,18 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
 
         let result = client.try_register_issuer(
             &issuer_id,
             &Address::from_str(&env, ISSUER_TWO),
             &bytes(&env, 3),
+            &bytes(&env, 99),
         );
         assert_eq!(result, Err(Ok(IssuerError::IssuerAlreadyRegistered)));
     }
@@ -1160,7 +1309,12 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         client.revoke_issuer(&issuer_id);
 
         let result = client.try_reactivate_issuer(&issuer_id);
@@ -1173,7 +1327,12 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
 
         env.as_contract(&client.address, || {
             assert!(
@@ -1222,18 +1381,15 @@ mod test {
     #[test]
     fn approve_upgrade_rejects_downgrade_version() {
         let (env, client, _admin) = setup();
-        let result = client.try_approve_upgrade(&bytes(&env, 1), &1);
-        assert_eq!(
-            result,
-            Err(Ok(earnproof_shared::ContractError::InvalidInput))
-        );
+        let res = client.try_approve_upgrade(&bytes(&env, 1), &1);
+        assert_eq!(res, Err(Ok(ContractError::InvalidInput)));
     }
 
     #[test]
-    #[should_panic(expected = "wasm hash not on allowlist")]
     fn upgrade_contract_rejects_non_allowlisted_hash() {
         let (env, client, _admin) = setup();
-        client.upgrade_contract(&bytes(&env, 0xff));
+        let res = client.try_upgrade_contract(&bytes(&env, 0xff), &2);
+        assert_eq!(res, Err(Ok(ContractError::NoUpgradeApproval)));
     }
 
     /// Auth guard: upgrade_contract without admin signature must panic.
@@ -1253,7 +1409,7 @@ mod test {
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
         env.set_auths(&[]);
 
-        client.upgrade_contract(&hash);
+        client.upgrade_contract(&hash, &2);
     }
 
     #[test]
@@ -1264,14 +1420,13 @@ mod test {
         client.approve_upgrade(&hash, &2);
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
-        client.upgrade_contract(&hash);
+        client.upgrade_contract(&hash, &2);
 
         assert_eq!(client.get_contract_version(), 2);
         assert!(!client.is_upgrade_allowed(&hash));
     }
 
     #[test]
-    #[should_panic(expected = "wasm hash not on allowlist")]
     fn upgrade_hash_cannot_be_replayed() {
         let (env, client, _admin) = setup();
         let hash = bytes(&env, 0x42);
@@ -1279,8 +1434,9 @@ mod test {
         client.approve_upgrade(&hash, &2);
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
-        client.upgrade_contract(&hash);
-        client.upgrade_contract(&hash);
+        client.upgrade_contract(&hash, &2);
+        let res = client.try_upgrade_contract(&hash, &2);
+        assert_eq!(res, Err(Ok(ContractError::NoUpgradeApproval)));
     }
 
     /// Persistent issuer state must survive an upgrade.
@@ -1290,14 +1446,19 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         assert!(client.is_active_issuer(&issuer_id));
 
         let hash = bytes(&env, 0x77);
         client.approve_upgrade(&hash, &2);
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
-        client.upgrade_contract(&hash);
+        client.upgrade_contract(&hash, &2);
 
         // Issuer record must still be intact.
         assert!(client.is_active_issuer(&issuer_id));
@@ -1313,11 +1474,11 @@ mod test {
         client.approve_upgrade(&hash_v2, &2);
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
-        client.upgrade_contract(&hash_v2);
+        client.upgrade_contract(&hash_v2, &2);
 
         // Attempting to allowlist version 1 after reaching version 2.
-        let result = client.try_approve_upgrade(&old_hash, &1);
-        assert!(result.is_err());
+        let res = client.try_approve_upgrade(&old_hash, &1);
+        assert_eq!(res, Err(Ok(ContractError::InvalidInput)));
     }
 
     // -----------------------------------------------------------------------
@@ -1342,7 +1503,12 @@ mod test {
         let metadata_hash = bytes(&env, 2);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &metadata_hash);
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &metadata_hash,
+            &bytes(&env, 99),
+        );
 
         assert_eq!(
             env.events().all().events().len(),
@@ -1358,11 +1524,21 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
 
         // Attempt a duplicate — the invocation must panic.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 3));
+            client.register_issuer(
+                &issuer_id,
+                &issuer_address,
+                &bytes(&env, 3),
+                &bytes(&env, 99),
+            );
         }));
         assert!(result.is_err(), "expected panic on duplicate");
         // Failed invocations emit no contract success events.
@@ -1381,7 +1557,12 @@ mod test {
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
         let new_metadata = bytes(&env, 99);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         client.update_issuer(&issuer_id, &new_metadata);
 
         assert_eq!(
@@ -1398,7 +1579,12 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         client.revoke_issuer(&issuer_id);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1419,7 +1605,12 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         client.suspend_issuer(&issuer_id);
 
         assert_eq!(
@@ -1436,7 +1627,12 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         client.suspend_issuer(&issuer_id);
         client.reactivate_issuer(&issuer_id);
 
@@ -1454,7 +1650,12 @@ mod test {
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
 
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         client.revoke_issuer(&issuer_id);
 
         assert_eq!(
@@ -1472,7 +1673,7 @@ mod test {
         let old_address = Address::from_str(&env, ISSUER_ONE);
         let new_address = Address::from_str(&env, ISSUER_TWO);
 
-        client.register_issuer(&issuer_id, &old_address, &bytes(&env, 2));
+        client.register_issuer(&issuer_id, &old_address, &bytes(&env, 2), &bytes(&env, 99));
         client.rotate_issuer_address(&issuer_id, &new_address);
 
         assert_eq!(
@@ -1490,7 +1691,7 @@ mod test {
         let old_address = Address::from_str(&env, ISSUER_ONE);
         let new_address = Address::from_str(&env, ISSUER_TWO);
 
-        client.register_issuer(&issuer_id, &old_address, &bytes(&env, 2));
+        client.register_issuer(&issuer_id, &old_address, &bytes(&env, 2), &bytes(&env, 99));
         client.revoke_issuer(&issuer_id);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1515,7 +1716,12 @@ mod test {
         let new_address = Address::from_str(&env, ISSUER_TWO);
 
         // register
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
         assert_eq!(env.events().all().events().len(), 1);
 
         // update metadata
@@ -1567,7 +1773,12 @@ mod test {
         // valid registration target here.
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::generate(&env);
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
 
         // From here on, only the issuer's own signature is authorized for
         // this specific revoke_issuer invocation — not a blanket
@@ -1621,14 +1832,14 @@ mod test {
         client.approve_upgrade(&bytes(&env, 1), &2);
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
-        client.upgrade_contract(&bytes(&env, 1));
+        client.upgrade_contract(&bytes(&env, 1), &2);
         assert_eq!(client.get_contract_version(), 2);
 
         // Valid: large version number
         client.approve_upgrade(&bytes(&env, 2), &u32::MAX);
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
-        client.upgrade_contract(&bytes(&env, 2));
+        client.upgrade_contract(&bytes(&env, 2), &u32::MAX);
         assert_eq!(client.get_contract_version(), u32::MAX);
     }
 
@@ -1636,16 +1847,16 @@ mod test {
     fn contract_version_equal_current_rejected() {
         let (env, client, _admin) = setup();
         // Current version is 1; attempting version 1 is rejected
-        let result = client.try_approve_upgrade(&bytes(&env, 1), &1);
-        assert!(result.is_err());
+        let res = client.try_approve_upgrade(&bytes(&env, 1), &1);
+        assert_eq!(res, Err(Ok(ContractError::InvalidInput)));
     }
 
     #[test]
     fn contract_version_below_current_rejected() {
         let (env, client, _admin) = setup();
         // Current version is 1; attempting version 0 is rejected
-        let result = client.try_approve_upgrade(&bytes(&env, 1), &0);
-        assert!(result.is_err());
+        let res = client.try_approve_upgrade(&bytes(&env, 1), &0);
+        assert_eq!(res, Err(Ok(ContractError::InvalidInput)));
     }
 
     /// Test storage invariants: failed boundary cases must not modify state.
@@ -1853,7 +2064,12 @@ mod test {
         // Perform issuer registration
         let issuer_id = bytes(&env, 1);
         let issuer_address = Address::from_str(&env, ISSUER_ONE);
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 2));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 2),
+            &bytes(&env, 99),
+        );
 
         // Admin must remain unchanged
         assert_eq!(
@@ -1927,7 +2143,7 @@ mod test {
         client.approve_upgrade(&wasm_hash, &2);
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
-        client.upgrade_contract(&wasm_hash);
+        client.upgrade_contract(&wasm_hash, &2);
         assert_ne!(client.get_config_digest(), initial);
     }
 
@@ -1946,7 +2162,12 @@ mod test {
             client.get_issuer_ttl_status(&unknown_id).health,
             earnproof_shared::TtlHealth::Missing
         );
-        client.register_issuer(&issuer_id, &issuer_address, &bytes(&env, 0xe3));
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 0xe3),
+            &bytes(&env, 0x99),
+        );
         assert_eq!(
             client.get_issuer_ttl_status(&issuer_id).health,
             earnproof_shared::TtlHealth::Healthy
@@ -2057,7 +2278,7 @@ mod upgrade_timelock_tests {
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + 1000);
 
-        // Re-approve
+        // Re-approve (outside as_contract closure)
         client.approve_upgrade(&make_wasm_hash(&env), &2);
 
         env.as_contract(&client.address, || {
@@ -2091,7 +2312,7 @@ mod upgrade_timelock_tests {
         client.approve_upgrade(&hash, &2);
 
         // Try immediately (before timelock)
-        let result = client.try_upgrade_contract(&hash);
+        let result = client.try_upgrade_contract(&hash, &2);
 
         assert!(result.is_err(), "Execute before timelock must be rejected");
     }
@@ -2108,7 +2329,7 @@ mod upgrade_timelock_tests {
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
 
-        let result = client.try_upgrade_contract(&hash);
+        let result = client.try_upgrade_contract(&hash, &2);
 
         assert!(result.is_ok(), "Execute at earliest_execution must succeed");
     }
@@ -2125,7 +2346,7 @@ mod upgrade_timelock_tests {
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS - 1);
 
-        assert!(client.try_upgrade_contract(&hash).is_err());
+        assert!(client.try_upgrade_contract(&hash, &2).is_err());
     }
 
     // ── SUITE 3: Expiry enforcement ────────────────────────────
@@ -2142,7 +2363,7 @@ mod upgrade_timelock_tests {
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_APPROVAL_EXPIRY_LEDGERS + 1);
 
-        let result = client.try_upgrade_contract(&hash);
+        let result = client.try_upgrade_contract(&hash, &2);
 
         assert!(result.is_err(), "Execute after expiry must be rejected");
     }
@@ -2159,7 +2380,7 @@ mod upgrade_timelock_tests {
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_APPROVAL_EXPIRY_LEDGERS);
 
-        let result = client.try_upgrade_contract(&hash);
+        let result = client.try_upgrade_contract(&hash, &2);
 
         assert!(
             result.is_err(),
@@ -2176,7 +2397,7 @@ mod upgrade_timelock_tests {
         client.approve_upgrade(&hash, &2);
 
         // Attempt execute before timelock (fails)
-        let _ = client.try_upgrade_contract(&hash);
+        let _ = client.try_upgrade_contract(&hash, &2);
 
         // Approval must still exist unchanged
         env.as_contract(&client.address, || {
@@ -2252,7 +2473,10 @@ mod upgrade_timelock_tests {
         // Must not panic — saturating_add used
         let result = client.try_approve_upgrade(&make_wasm_hash(&env), &2);
 
-        assert!(result.is_ok(), "Approve near u32::MAX must not overflow");
+        assert!(
+            result.is_ok(),
+            "Approve at high ledger sequence must succeed"
+        );
     }
 
     #[test]
@@ -2280,10 +2504,10 @@ mod upgrade_timelock_tests {
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
 
         // Execute (consumes approval)
-        client.upgrade_contract(&hash);
+        client.upgrade_contract(&hash, &2);
 
         // Replay attempt — must fail (no approval)
-        let result = client.try_upgrade_contract(&hash);
+        let result = client.try_upgrade_contract(&hash, &2);
 
         assert!(result.is_err(), "Replaying used approval must fail");
     }
@@ -2300,7 +2524,7 @@ mod upgrade_timelock_tests {
         env.ledger()
             .set_sequence_number(env.ledger().sequence() + UPGRADE_TIMELOCK_LEDGERS);
 
-        let result = client.try_upgrade_contract(&different_hash);
+        let result = client.try_upgrade_contract(&different_hash, &2);
 
         assert!(result.is_err());
     }
@@ -2336,7 +2560,7 @@ mod upgrade_timelock_tests {
         client.approve_upgrade(&make_wasm_hash(&env), &2);
         env.set_auths(&[]);
 
-        let result = client.try_upgrade_contract(&make_wasm_hash(&env));
+        let result = client.try_upgrade_contract(&make_wasm_hash(&env), &2);
 
         assert!(result.is_err(), "Non-admin must not execute");
     }

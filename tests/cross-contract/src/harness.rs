@@ -215,7 +215,7 @@ impl Deployment<'_> {
         let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
         issuers.initialize(&admin);
         let issuer_id = hash(&env, 0x01);
-        issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA));
+        issuers.register_issuer(&issuer_id, &issuer, &hash(&env, 0xAA), &hash(&env, 0x99));
 
         let (config_ref, issuers_ref) = choose(&env, config_id, issuers_id);
 

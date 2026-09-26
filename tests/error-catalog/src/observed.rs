@@ -47,7 +47,12 @@ fn deployment() -> Deployment {
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
-    issuers.register_issuer(&bytes32(&env, 1), &issuer, &bytes32(&env, 2));
+    issuers.register_issuer(
+        &bytes32(&env, 1),
+        &issuer,
+        &bytes32(&env, 2),
+        &bytes32(&env, 99),
+    );
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
@@ -98,8 +103,8 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     let mut observed = Observations::new();
 
     // --- protocol-config -------------------------------------------------
-    let deployment = deployment();
-    let env = &deployment.env;
+    let initial_dep = deployment();
+    let env = &initial_dep.env;
 
     let fresh_config = env.register(ProtocolConfigContract, ());
     let fresh_config = ProtocolConfigContractClient::new(env, &fresh_config);
@@ -113,75 +118,80 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     );
     observed.record(
         "protocol-config initialize twice",
-        code(deployment.config.try_initialize(&deployment.admin)),
+        code(initial_dep.config.try_initialize(&initial_dep.admin)),
     );
     observed.record(
         "protocol-config approve_schema_version(0)",
-        code(deployment.config.try_approve_schema_version(&0)),
+        code(initial_dep.config.try_approve_schema_version(&0)),
     );
     observed.record(
         "protocol-config deprecate_schema_version(0)",
-        code(deployment.config.try_deprecate_schema_version(&0)),
+        code(initial_dep.config.try_deprecate_schema_version(&0)),
     );
 
     // --- issuer-registry -------------------------------------------------
     observed.record(
         "issuer-registry initialize twice",
-        code(deployment.issuers.try_initialize(&deployment.admin)),
+        code(initial_dep.issuers.try_initialize(&initial_dep.admin)),
     );
     observed.record(
         "issuer-registry duplicate issuer id",
-        code(deployment.issuers.try_register_issuer(
+        code(initial_dep.issuers.try_register_issuer(
             &bytes32(env, 1),
             &Address::generate(env),
             &bytes32(env, 3),
+            &bytes32(env, 99),
         )),
     );
     observed.record(
         "issuer-registry duplicate issuer address",
-        code(deployment.issuers.try_register_issuer(
+        code(initial_dep.issuers.try_register_issuer(
             &bytes32(env, 9),
-            &deployment.issuer,
+            &initial_dep.issuer,
             &bytes32(env, 3),
+            &bytes32(env, 99),
         )),
     );
     observed.record(
         "issuer-registry update unknown issuer",
         code(
-            deployment
+            initial_dep
                 .issuers
                 .try_update_issuer(&bytes32(env, 99), &bytes32(env, 3)),
         ),
     );
     observed.record(
         "issuer-registry get unknown issuer",
-        code(deployment.issuers.try_get_issuer(&bytes32(env, 99))),
+        code(initial_dep.issuers.try_get_issuer(&bytes32(env, 99))),
     );
     observed.record(
         "issuer-registry lookup unknown address",
         code(
-            deployment
+            initial_dep
                 .issuers
                 .try_get_issuer_by_address(&Address::generate(env)),
         ),
     );
 
     let revoked_issuer = Address::generate(env);
-    deployment
-        .issuers
-        .register_issuer(&bytes32(env, 20), &revoked_issuer, &bytes32(env, 21));
-    deployment.issuers.revoke_issuer(&bytes32(env, 20));
+    initial_dep.issuers.register_issuer(
+        &bytes32(env, 20),
+        &revoked_issuer,
+        &bytes32(env, 21),
+        &bytes32(env, 99),
+    );
+    initial_dep.issuers.revoke_issuer(&bytes32(env, 20));
     observed.record(
         "issuer-registry update revoked issuer",
         code(
-            deployment
+            initial_dep
                 .issuers
                 .try_update_issuer(&bytes32(env, 20), &bytes32(env, 22)),
         ),
     );
     observed.record(
         "issuer-registry reactivate revoked issuer",
-        code(deployment.issuers.try_reactivate_issuer(&bytes32(env, 20))),
+        code(initial_dep.issuers.try_reactivate_issuer(&bytes32(env, 20))),
     );
 
     // --- proof-registry --------------------------------------------------
@@ -193,66 +203,66 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     );
     observed.record(
         "proof-registry initialize twice",
-        code(deployment.proofs.try_initialize(
-            &deployment.admin,
-            &deployment.issuers_id,
-            &deployment.config_id,
+        code(initial_dep.proofs.try_initialize(
+            &initial_dep.admin,
+            &initial_dep.issuers_id,
+            &initial_dep.config_id,
         )),
     );
 
     let proof_id = bytes32(env, 5);
-    deployment.proofs.register_proof(
+    initial_dep.proofs.register_proof(
         &proof_id,
         &bytes32(env, 6),
-        &deployment.issuer,
+        &initial_dep.issuer,
         &1,
         &FAR_FUTURE,
     );
     observed.record(
         "proof-registry duplicate proof id",
-        code(deployment.proofs.try_register_proof(
+        code(initial_dep.proofs.try_register_proof(
             &proof_id,
             &bytes32(env, 7),
-            &deployment.issuer,
+            &initial_dep.issuer,
             &1,
             &FAR_FUTURE,
         )),
     );
     observed.record(
         "proof-registry get unknown proof",
-        code(deployment.proofs.try_get_proof(&bytes32(env, 99))),
+        code(initial_dep.proofs.try_get_proof(&bytes32(env, 99))),
     );
-    deployment.proofs.revoke_proof(&proof_id);
+    initial_dep.proofs.revoke_proof(&proof_id);
     observed.record(
         "proof-registry revoke twice",
-        code(deployment.proofs.try_revoke_proof(&proof_id)),
+        code(initial_dep.proofs.try_revoke_proof(&proof_id)),
     );
     observed.record(
         "proof-registry expiration in the past",
-        code(deployment.proofs.try_register_proof(
+        code(initial_dep.proofs.try_register_proof(
             &bytes32(env, 30),
             &bytes32(env, 31),
-            &deployment.issuer,
+            &initial_dep.issuer,
             &1,
             &0,
         )),
     );
     observed.record(
         "proof-registry schema version zero",
-        code(deployment.proofs.try_register_proof(
+        code(initial_dep.proofs.try_register_proof(
             &bytes32(env, 32),
             &bytes32(env, 33),
-            &deployment.issuer,
+            &initial_dep.issuer,
             &0,
             &FAR_FUTURE,
         )),
     );
     observed.record(
         "proof-registry unapproved schema version",
-        code(deployment.proofs.try_register_proof(
+        code(initial_dep.proofs.try_register_proof(
             &bytes32(env, 34),
             &bytes32(env, 35),
-            &deployment.issuer,
+            &initial_dep.issuer,
             &7,
             &FAR_FUTURE,
         )),
@@ -342,9 +352,12 @@ fn a_suspended_issuer_is_reported_as_issuer_inactive() {
     let deployment = deployment();
     let env = &deployment.env;
     let suspended = Address::generate(env);
-    deployment
-        .issuers
-        .register_issuer(&bytes32(env, 40), &suspended, &bytes32(env, 41));
+    deployment.issuers.register_issuer(
+        &bytes32(env, 40),
+        &suspended,
+        &bytes32(env, 41),
+        &bytes32(env, 99),
+    );
     deployment.issuers.suspend_issuer(&bytes32(env, 40));
 
     let result = deployment.proofs.try_register_proof(

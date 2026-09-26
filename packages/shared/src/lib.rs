@@ -271,6 +271,18 @@ pub enum ProofError {
 }
 
 #[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PauseScope {
+    Global,
+    Registration,
+    Update,
+    Updates,
+    Revocation,
+    Upgrade,
+    Upgrades,
+}
+
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IssuerStatus {
     Active,
@@ -315,6 +327,7 @@ pub struct IssuerRecord {
     pub issuer_id_hash: BytesN<32>,
     pub issuer_address: Address,
     pub metadata_hash: BytesN<32>,
+    pub provenance_commitment: BytesN<32>,
     pub status: IssuerStatus,
     pub created_at: u64,
     pub updated_at: u64,
@@ -331,16 +344,6 @@ pub struct ProofRecord {
     pub expires_at: u64,
     pub created_at: u64,
     pub revoked_at: u64,
-}
-
-#[contracttype]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum PauseScope {
-    Global,
-    Registration,
-    Update,
-    Revocation,
-    Upgrade,
 }
 
 #[contracttype]

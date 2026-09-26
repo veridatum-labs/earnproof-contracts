@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracterror, contracttype, Address, BytesN};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env};
 
 pub mod storage_namespaces;
 
@@ -167,6 +167,59 @@ pub struct ProofRecord {
     pub expires_at: u64,
     pub created_at: u64,
     pub revoked_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationRecord {
+    pub old_address: Address,
+    pub new_address: Address,
+    pub rotated_at: u64,
+    pub ledger_sequence: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RevokerRole {
+    Issuer,
+    Admin,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RevocationRecord {
+    pub proof_id_hash: BytesN<32>,
+    pub revoker_role: RevokerRole,
+    pub revoker: Address,
+    pub reason_commitment: BytesN<32>,
+    pub revoked_at: u64,
+    pub ledger_sequence: u32,
+}
+
+pub const PROTOCOL_DOMAIN_TAG: &[u8] = b"EARNPROOF_V1";
+pub const MAX_PROOF_BATCH_SIZE: u32 = 50;
+
+pub fn compute_domain_separator(
+    env: &Env,
+    network_id: &BytesN<32>,
+    contract_address: &Address,
+) -> BytesN<32> {
+    let mut payload = soroban_sdk::Bytes::new(env);
+    payload.extend_from_slice(PROTOCOL_DOMAIN_TAG);
+    payload.extend_from_slice(&network_id.to_array());
+    payload.extend_from_slice(&address_bytes(contract_address));
+    env.crypto().sha256(&payload).into()
+}
+
+pub fn compute_domain_commitment(
+    env: &Env,
+    domain_separator: &BytesN<32>,
+    raw_commitment: &BytesN<32>,
+) -> BytesN<32> {
+    let mut payload = soroban_sdk::Bytes::new(env);
+    payload.extend_from_slice(&domain_separator.to_array());
+    payload.extend_from_slice(&raw_commitment.to_array());
+    env.crypto().sha256(&payload).into()
 }
 
 // ── Shared Test Utilities ──────────────────────────────────────────────────────

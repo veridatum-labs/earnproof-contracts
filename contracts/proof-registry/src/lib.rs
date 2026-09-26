@@ -1,8 +1,10 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, ProofError, ProofRecord, ProofStatus, TTL_EXTEND_TO_LEDGERS,
-    TTL_THRESHOLD_LEDGERS,
+    compute_domain_commitment as shared_compute_domain_commitment,
+    compute_domain_separator as shared_compute_domain_separator, ContractError, ProofError,
+    ProofRecord, ProofStatus, RevocationRecord, RevokerRole, MAX_PROOF_BATCH_SIZE,
+    TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{
     contract, contractclient, contractevent, contractimpl, contracttype, Address, BytesN, Env,
@@ -28,6 +30,7 @@ enum DataKey {
     IssuerRegistry,
     ProtocolConfig,
     Proof(BytesN<32>),
+    RevocationInfo(BytesN<32>),
     /// Allowlist entry: maps a WASM hash to the target contract version.
     AllowedWasm(BytesN<32>),
     /// Monotonically-increasing contract version.  Prevents downgrade.
@@ -160,11 +163,101 @@ impl ProofRegistryContract {
     }
 
     pub fn revoke_proof(env: Env, proof_id_hash: BytesN<32>) -> Result<(), ProofError> {
-        Self::set_revoked(env, proof_id_hash, false)
+        Self::set_revoked(env, proof_id_hash, false, None)
     }
 
     pub fn admin_revoke_proof(env: Env, proof_id_hash: BytesN<32>) -> Result<(), ProofError> {
-        Self::set_revoked(env, proof_id_hash, true)
+        Self::set_revoked(env, proof_id_hash, true, None)
+    }
+
+    pub fn revoke_proof_with_reason(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        reason_commitment: BytesN<32>,
+    ) -> Result<(), ProofError> {
+        Self::set_revoked(env, proof_id_hash, false, Some(reason_commitment))
+    }
+
+    pub fn admin_revoke_proof_with_reason(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        reason_commitment: BytesN<32>,
+    ) -> Result<(), ProofError> {
+        Self::set_revoked(env, proof_id_hash, true, Some(reason_commitment))
+    }
+
+    pub fn get_revocation_info(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+    ) -> Result<RevocationRecord, ProofError> {
+        let key = DataKey::RevocationInfo(proof_id_hash);
+        let record = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ProofError::ProofNotFound)?;
+        Self::extend_proof_key_ttl(env, &key);
+        Ok(record)
+    }
+
+    pub fn get_domain_separator(env: Env) -> BytesN<32> {
+        shared_compute_domain_separator(
+            &env,
+            &env.ledger().network_id(),
+            &env.current_contract_address(),
+        )
+    }
+
+    pub fn compute_domain_commitment(env: Env, raw_commitment: BytesN<32>) -> BytesN<32> {
+        let domain_sep = Self::get_domain_separator(env.clone());
+        shared_compute_domain_commitment(&env, &domain_sep, &raw_commitment)
+    }
+
+    pub fn register_proof_with_domain(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        raw_commitment: BytesN<32>,
+        issuer_address: Address,
+        schema_version: u32,
+        expires_at: u64,
+    ) -> Result<(), ProofError> {
+        let commitment_hash = Self::compute_domain_commitment(env.clone(), raw_commitment);
+        Self::register_proof(
+            env,
+            proof_id_hash,
+            commitment_hash,
+            issuer_address,
+            schema_version,
+            expires_at,
+        )
+    }
+
+    pub fn verify_domain_commitment(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        raw_commitment: BytesN<32>,
+    ) -> bool {
+        match Self::get_proof(env.clone(), proof_id_hash) {
+            Ok(record) => {
+                let expected = Self::compute_domain_commitment(env, raw_commitment);
+                record.commitment_hash == expected
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub fn is_valid_proof_batch(
+        env: Env,
+        proof_ids: soroban_sdk::Vec<BytesN<32>>,
+    ) -> Result<soroban_sdk::Vec<bool>, ContractError> {
+        if proof_ids.len() > MAX_PROOF_BATCH_SIZE {
+            return Err(ContractError::InvalidInput);
+        }
+        let mut results = soroban_sdk::Vec::new(&env);
+        for proof_id in proof_ids.iter() {
+            results.push_back(Self::is_valid_proof(env.clone(), proof_id));
+        }
+        Ok(results)
     }
 
     pub fn get_proof(env: Env, proof_id_hash: BytesN<32>) -> Result<ProofRecord, ProofError> {
@@ -358,7 +451,12 @@ impl ProofRegistryContract {
         Ok(())
     }
 
-    fn set_revoked(env: Env, proof_id_hash: BytesN<32>, by_admin: bool) -> Result<(), ProofError> {
+    fn set_revoked(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        by_admin: bool,
+        reason_commitment: Option<BytesN<32>>,
+    ) -> Result<(), ProofError> {
         let key = DataKey::Proof(proof_id_hash.clone());
         let mut record: ProofRecord = env
             .storage()
@@ -366,12 +464,14 @@ impl ProofRegistryContract {
             .get(&key)
             .ok_or(ProofError::ProofNotFound)?;
 
-        if by_admin {
+        let (revoker, revoker_role) = if by_admin {
             let admin = Self::get_admin(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
             Self::require_auth(&admin);
+            (admin, RevokerRole::Admin)
         } else {
             Self::require_auth(&record.issuer_address);
-        }
+            (record.issuer_address.clone(), RevokerRole::Issuer)
+        };
 
         if record.status == ProofStatus::Revoked {
             return Err(ProofError::ProofAlreadyRevoked);
@@ -380,7 +480,20 @@ impl ProofRegistryContract {
         record.status = ProofStatus::Revoked;
         record.revoked_at = env.ledger().timestamp();
         env.storage().persistent().set(&key, &record);
-        Self::extend_proof_key_ttl(env, &key);
+        Self::extend_proof_key_ttl(env.clone(), &key);
+
+        let reason = reason_commitment.unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]));
+        let revocation_record = RevocationRecord {
+            proof_id_hash: proof_id_hash.clone(),
+            revoker_role,
+            revoker,
+            reason_commitment: reason,
+            revoked_at: record.revoked_at,
+            ledger_sequence: env.ledger().sequence(),
+        };
+        let rev_key = DataKey::RevocationInfo(proof_id_hash);
+        env.storage().persistent().set(&rev_key, &revocation_record);
+        Self::extend_proof_key_ttl(env, &rev_key);
         Ok(())
     }
 
@@ -406,7 +519,7 @@ mod test {
     extern crate std;
 
     use super::{DataKey, ProofRegistryContract, ProofRegistryContractClient};
-    use earnproof_shared::{ProofError, ProofStatus, TTL_THRESHOLD_LEDGERS};
+    use earnproof_shared::{ContractError, ProofError, ProofStatus, TTL_THRESHOLD_LEDGERS};
     use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};
     use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
     use soroban_sdk::{testutils::storage::Persistent as _, Address, BytesN, Env};
@@ -1542,5 +1655,161 @@ mod test {
         assert!(pc_client.is_paused());
         pc_client.unpause();
         assert!(!pc_client.is_paused());
+    }
+
+    // ── Revocation Reason Commitments Tests (Issue #143) ───────────────────
+
+    #[test]
+    fn issuer_revoke_with_reason_stores_revocation_record() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 101);
+        let commitment = bytes(&env, 102);
+        let issuer = Address::from_str(&env, ISSUER);
+        let reason = bytes(&env, 201);
+
+        client.register_proof(&proof_id, &commitment, &issuer, &1, &5_000);
+        assert!(client.is_valid_proof(&proof_id));
+
+        client.revoke_proof_with_reason(&proof_id, &reason);
+
+        assert!(client.is_revoked(&proof_id));
+        assert!(!client.is_valid_proof(&proof_id));
+
+        let rev_info = client.get_revocation_info(&proof_id);
+        assert_eq!(rev_info.proof_id_hash, proof_id);
+        assert_eq!(rev_info.revoker, issuer);
+        assert_eq!(rev_info.revoker_role, earnproof_shared::RevokerRole::Issuer);
+        assert_eq!(rev_info.reason_commitment, reason);
+    }
+
+    #[test]
+    fn admin_revoke_with_reason_stores_revocation_record() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 103);
+        let commitment = bytes(&env, 104);
+        let issuer = Address::from_str(&env, ISSUER);
+        let admin = Address::from_str(&env, ADMIN);
+        let reason = bytes(&env, 202);
+
+        client.register_proof(&proof_id, &commitment, &issuer, &1, &5_000);
+        client.admin_revoke_proof_with_reason(&proof_id, &reason);
+
+        assert!(client.is_revoked(&proof_id));
+        let rev_info = client.get_revocation_info(&proof_id);
+        assert_eq!(rev_info.proof_id_hash, proof_id);
+        assert_eq!(rev_info.revoker, admin);
+        assert_eq!(rev_info.revoker_role, earnproof_shared::RevokerRole::Admin);
+        assert_eq!(rev_info.reason_commitment, reason);
+    }
+
+    #[test]
+    fn duplicate_revocation_is_rejected_and_reason_cannot_be_overwritten() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 105);
+        let commitment = bytes(&env, 106);
+        let issuer = Address::from_str(&env, ISSUER);
+        let reason1 = bytes(&env, 203);
+        let reason2 = bytes(&env, 204);
+
+        client.register_proof(&proof_id, &commitment, &issuer, &1, &5_000);
+        client.revoke_proof_with_reason(&proof_id, &reason1);
+
+        let err = client.try_revoke_proof_with_reason(&proof_id, &reason2);
+        assert_eq!(err, Err(Ok(ProofError::ProofAlreadyRevoked)));
+
+        let rev_info = client.get_revocation_info(&proof_id);
+        assert_eq!(rev_info.reason_commitment, reason1);
+    }
+
+    // ── Protocol Domain Separation Tests (Issue #145) ──────────────────────
+
+    #[test]
+    fn domain_commitment_deterministic_and_separates_domains() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let raw_commitment = bytes(&env, 55);
+
+        let domain_sep = client.get_domain_separator();
+        let domain_comm1 = client.compute_domain_commitment(&raw_commitment);
+        let domain_comm2 = client.compute_domain_commitment(&raw_commitment);
+
+        assert_eq!(domain_comm1, domain_comm2);
+        assert_ne!(raw_commitment, domain_comm1);
+
+        // Cross-domain difference: different raw commitments produce different domain commitments
+        let other_raw = bytes(&env, 56);
+        let other_comm = client.compute_domain_commitment(&other_raw);
+        assert_ne!(domain_comm1, other_comm);
+
+        // Off-chain / shared helper matches contract computation
+        let manual_domain_sep = earnproof_shared::compute_domain_separator(
+            &env,
+            &env.ledger().network_id(),
+            &client.address,
+        );
+        assert_eq!(domain_sep, manual_domain_sep);
+        let manual_comm =
+            earnproof_shared::compute_domain_commitment(&env, &manual_domain_sep, &raw_commitment);
+        assert_eq!(domain_comm1, manual_comm);
+    }
+
+    #[test]
+    fn register_and_verify_domain_separated_proof() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 110);
+        let raw_commitment = bytes(&env, 111);
+        let issuer = Address::from_str(&env, ISSUER);
+
+        client.register_proof_with_domain(&proof_id, &raw_commitment, &issuer, &1, &10_000);
+
+        assert!(client.is_valid_proof(&proof_id));
+        assert!(client.verify_domain_commitment(&proof_id, &raw_commitment));
+
+        let wrong_raw = bytes(&env, 112);
+        assert!(!client.verify_domain_commitment(&proof_id, &wrong_raw));
+    }
+
+    // ── Bounded Batch Proof Validity Queries Tests (Issue #146) ───────────
+
+    #[test]
+    fn batch_validity_query_matches_individual_queries_in_order() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+
+        let p1 = bytes(&env, 1);
+        let p2 = bytes(&env, 2);
+        let p3 = bytes(&env, 3);
+        let p_nonexistent = bytes(&env, 99);
+
+        client.register_proof(&p1, &bytes(&env, 11), &issuer, &1, &10_000);
+        client.register_proof(&p2, &bytes(&env, 12), &issuer, &1, &10_000);
+        client.register_proof(&p3, &bytes(&env, 13), &issuer, &1, &10_000);
+        client.revoke_proof(&p2);
+
+        let mut batch_ids = soroban_sdk::Vec::new(&env);
+        batch_ids.push_back(p1.clone());
+        batch_ids.push_back(p2.clone());
+        batch_ids.push_back(p3.clone());
+        batch_ids.push_back(p_nonexistent.clone());
+        batch_ids.push_back(p1.clone()); // duplicate check
+
+        let batch_results = client.is_valid_proof_batch(&batch_ids);
+        assert_eq!(batch_results.len(), 5);
+        assert!(batch_results.get(0).unwrap());
+        assert!(!batch_results.get(1).unwrap());
+        assert!(batch_results.get(2).unwrap());
+        assert!(!batch_results.get(3).unwrap());
+        assert!(batch_results.get(4).unwrap());
+    }
+
+    #[test]
+    fn batch_validity_query_rejects_exceeding_max_batch_size() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let mut oversized_batch = soroban_sdk::Vec::new(&env);
+        for i in 0..51 {
+            oversized_batch.push_back(bytes(&env, i as u8));
+        }
+
+        let result = client.try_is_valid_proof_batch(&oversized_batch);
+        assert_eq!(result, Err(Ok(ContractError::InvalidInput)));
     }
 }

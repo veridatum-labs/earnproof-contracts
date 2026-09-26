@@ -1,6 +1,6 @@
 # scenario: expired
-# revision: 4
-# reason: contract version keys are now persisted in initialized ledgers
+# revision: 5
+# reason: Add proof revocation reason commitments and rotation history
 # body-digest: ea53da0c2caa39527a07845f7e983d0ccf44f1e35c28ffa41ecd0bd20e455313
 
 [ledger]

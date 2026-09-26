@@ -100,17 +100,17 @@ fn per_record_namespaces_hold_one_entry_per_record() {
     let env = &deployment.env;
 
     // Three issuers, each with a record and a reverse-index entry. The rotated
-    // address replaces the old index entry rather than adding to it, so the
-    // count is six and not seven.
+    // address replaces the old index entry and adds rotation history + count entries,
+    // so the count is eight.
     assert_eq!(
         keys_in(env, &deployment.issuers_id, StorageClass::Persistent).len(),
-        6
+        8
     );
 
-    // Two proofs, one of them revoked in place.
+    // Two proofs, plus one revocation reason record for the revoked proof.
     assert_eq!(
         keys_in(env, &deployment.proofs_id, StorageClass::Persistent).len(),
-        2
+        3
     );
 
     // Two schema versions, one approved and one deprecated. Deprecation keeps

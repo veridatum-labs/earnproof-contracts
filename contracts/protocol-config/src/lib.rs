@@ -612,8 +612,7 @@ mod test {
                     &env,
                     soroban_sdk::IntoVal::into_val(&BytesN::from_array(&env, &[0xaa; 32]), &env),
                     soroban_sdk::IntoVal::into_val(&2_u32, &env),
-                ]
-                .into(),
+                ],
                 sub_invokes: &[],
             },
         }]);
@@ -849,9 +848,8 @@ mod test {
 
         // Verify exact state written
         assert_eq!(client.get_admin(), admin, "admin must be set");
-        assert_eq!(
-            client.is_paused(),
-            false,
+        assert!(
+            !client.is_paused(),
             "protocol must not be paused after initialization"
         );
         assert_eq!(
@@ -1093,7 +1091,7 @@ mod test {
 
         // State immediately after initialization must be as documented
         assert_eq!(client.get_admin(), admin);
-        assert_eq!(client.is_paused(), false);
+        assert!(!client.is_paused());
         assert_eq!(client.get_config_version(), 1);
         assert_eq!(client.get_contract_version(), 1);
 

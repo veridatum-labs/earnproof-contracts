@@ -1,7 +1,7 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, IssuerError, IssuerRecord, IssuerStatus, TTL_EXTEND_TO_LEDGERS,
+    ContractError, IssuerError, IssuerRecord, IssuerStatus, RotationRecord, TTL_EXTEND_TO_LEDGERS,
     TTL_THRESHOLD_LEDGERS,
 };
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env};
@@ -14,6 +14,8 @@ enum DataKey {
     Admin,
     Issuer(BytesN<32>),
     AddressIssuer(Address),
+    RotationHistory(BytesN<32>, u32),
+    RotationCount(BytesN<32>),
     /// Allowlist entry: maps a WASM hash to the target contract version.
     AllowedWasm(BytesN<32>),
     /// Monotonically-increasing contract version.  Prevents downgrade.
@@ -263,6 +265,26 @@ impl IssuerRegistryContract {
         Self::extend_issuer_key_ttl(env.clone(), &key);
         Self::extend_address_ttl(env.clone(), new_address.clone());
 
+        let count_key = DataKey::RotationCount(issuer_id_hash.clone());
+        let rotation_count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+
+        let rotation_record = RotationRecord {
+            old_address: old_address.clone(),
+            new_address: new_address.clone(),
+            rotated_at: now,
+            ledger_sequence: env.ledger().sequence(),
+        };
+
+        let history_key = DataKey::RotationHistory(issuer_id_hash.clone(), rotation_count);
+        env.storage()
+            .persistent()
+            .set(&history_key, &rotation_record);
+        env.storage()
+            .persistent()
+            .set(&count_key, &(rotation_count + 1));
+        Self::extend_issuer_key_ttl(env.clone(), &history_key);
+        Self::extend_issuer_key_ttl(env.clone(), &count_key);
+
         IssuerAddressRotated {
             issuer_id_hash,
             old_address,
@@ -271,6 +293,43 @@ impl IssuerRegistryContract {
         }
         .publish(&env);
         Ok(())
+    }
+
+    pub fn get_rotation_count(env: Env, issuer_id_hash: BytesN<32>) -> Result<u32, IssuerError> {
+        let _ = Self::get_issuer(env.clone(), issuer_id_hash.clone())?;
+        let count_key = DataKey::RotationCount(issuer_id_hash);
+        Ok(env.storage().persistent().get(&count_key).unwrap_or(0))
+    }
+
+    pub fn get_rotation_history(
+        env: Env,
+        issuer_id_hash: BytesN<32>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<soroban_sdk::Vec<RotationRecord>, IssuerError> {
+        let _ = Self::get_issuer(env.clone(), issuer_id_hash.clone())?;
+        if limit == 0 || limit > 50 {
+            return Err(IssuerError::InvalidTransition);
+        }
+
+        let count = Self::get_rotation_count(env.clone(), issuer_id_hash.clone())?;
+        if offset >= count {
+            return Ok(soroban_sdk::Vec::new(&env));
+        }
+
+        let end = count.min(offset.saturating_add(limit));
+        let mut history = soroban_sdk::Vec::new(&env);
+        for i in offset..end {
+            let history_key = DataKey::RotationHistory(issuer_id_hash.clone(), i);
+            if let Some(record) = env
+                .storage()
+                .persistent()
+                .get::<_, RotationRecord>(&history_key)
+            {
+                history.push_back(record);
+            }
+        }
+        Ok(history)
     }
 
     pub fn get_issuer(env: Env, issuer_id_hash: BytesN<32>) -> Result<IssuerRecord, IssuerError> {

@@ -1,6 +1,6 @@
 # scenario: paused
-# revision: 4
-# reason: contract version keys are now persisted in initialized ledgers
+# revision: 5
+# reason: Add proof revocation reason commitments and rotation history
 # body-digest: 01db9c6fd2c371f4e82f9335d4f4b82ae10de9b172fff39240eb74da684c9862
 
 [ledger]

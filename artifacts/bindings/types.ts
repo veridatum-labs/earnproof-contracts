@@ -427,6 +427,33 @@ export interface IsRevokedParams {
 export type IsRevokedResult = boolean;
 
 /**
+ * Parameters for proof_registry::commit_disclosure_consent
+ */
+export interface CommitDisclosureConsentParams {
+  proof_id_hash: string; // BytesN<32> as hex string
+  policy_hash: string; // BytesN<32> as hex string
+  receipt_version: number; // u32
+  receipt_hash: string; // Salted receipt digest as hex string
+}
+
+/**
+ * Return type: BytesN<32> commitment hash as a hex string
+ */
+export type CommitDisclosureConsentResult = string;
+
+/**
+ * Parameters for proof_registry::has_consent_receipt_commitment
+ */
+export interface HasConsentReceiptCommitmentParams {
+  commitment_hash: string; // BytesN<32> as hex string
+}
+
+/**
+ * Return type: bool
+ */
+export type HasConsentReceiptCommitmentResult = boolean;
+
+/**
  * Parameters for proof_registry::get_admin
  */
 export interface GetAdminProofRegistryParams {

@@ -12,7 +12,7 @@ Privileged entry points span:
 
 - **protocol-config** — pause controls, admin rotation, schema lifecycle
 - **issuer-registry** — issuer registration, status transitions, address rotation
-- **proof-registry** — proof registration, issuer-gated revocation, admin revocation
+- **proof-registry** — proof registration, issuer-gated revocation and consent commitments, admin revocation
 
 Success-path tests do not prove every unauthorized identity is side-effect free.
 This matrix does.
@@ -59,6 +59,7 @@ This matrix does.
 |---|---|---|---|---|---|
 | `initialize` | New admin (self-signing) | ❌ Rejected | ❌ Rejected | — | ✅ Accepted |
 | `register_proof` | Named issuer | ❌ Rejected | ❌ Rejected | Different active issuer ❌ Rejected | ✅ Accepted |
+| `commit_disclosure_consent` | Proof's issuer | ❌ Rejected | ❌ Rejected | Different active issuer ❌ Rejected | ✅ Accepted |
 | `revoke_proof` | Proof's issuer | ❌ Rejected | ❌ Rejected | Different active issuer ❌ Rejected | ✅ Accepted |
 | `admin_revoke_proof` | Registry admin | ❌ Rejected | ❌ Rejected | Proof's own issuer ❌ Rejected | ✅ Accepted |
 
@@ -72,6 +73,7 @@ them; gating them would break integrations.
 | protocol-config | `get_admin`, `is_paused`, `get_config_version`, `is_schema_version_approved` |
 | issuer-registry | `get_admin`, `get_issuer`, `get_issuer_by_address`, `is_active_issuer`, `is_active_address` |
 | proof-registry | `get_admin`, `get_issuer_registry`, `get_protocol_config`, `get_proof`, `is_valid_proof`, `is_revoked` |
+| proof-registry | `has_consent_receipt_commitment` |
 
 ## Side-effect assertions
 
@@ -146,7 +148,7 @@ Some rows require fixture state before the authorization attempt:
 The guard constant in `matrix.rs`:
 
 ```rust
-const DOCUMENTED_MUTATIONS: usize = 17;
+const DOCUMENTED_MUTATIONS: usize = 18;
 ```
 
 Bump this constant **only together with** this document when a new mutating
@@ -157,11 +159,11 @@ fails immediately when the counts disagree.
 
 | Metric | Count |
 |--------|-------|
-| Mutating entry points | 17 |
-| Read-only entry points | 16 |
-| Negative matrix rows (Missing × 17) | 17 |
-| Negative matrix rows (Wrong × 17) | 17 |
-| Control rows (Authorized × 17) | 17 |
+| Mutating entry points | 18 |
+| Read-only entry points | 17 |
+| Negative matrix rows (Missing × 18) | 18 |
+| Negative matrix rows (Wrong × 18) | 18 |
+| Control rows (Authorized × 18) | 18 |
 | Cross-role boundary tests | 4 |
 | Authorization tree assertions | 4 |
 | Stale/former-admin tests | 6 |

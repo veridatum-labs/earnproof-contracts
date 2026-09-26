@@ -13,8 +13,10 @@
 //! computed, round-tripped through a real contract invocation.
 
 use soroban_sdk::testutils::{Address as _, Events as _};
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, BytesN, Env, Symbol, TryFromVal, Val};
 
+use earnproof_shared::disclosure_consent_commitment;
 use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};
 use proof_registry::{ProofRegistryContract, ProofRegistryContractClient};
 use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
@@ -202,6 +204,159 @@ fn proof_registry_accepts_backend_hashes_and_stores_them_queryable_by_the_same_k
     assert_eq!(record.proof_id_hash, proof_id_hash);
     assert_eq!(record.commitment_hash, commitment_hash);
     assert!(proofs.is_valid_proof(&proof_id_hash));
+}
+
+#[test]
+fn consent_receipt_commitment_matches_canonical_xdr_and_is_domain_separated() {
+    let env = Env::default();
+    let network_id = BytesN::from_array(&env, &[0x10; 32]);
+    let registry = Address::from_str(
+        &env,
+        "CC3OREX5QBIKJ5JOW36JFJJW7TLAKJOVT5WJXEITGALO7MU32KHICS2A",
+    );
+    let proof_id = BytesN::from_array(&env, &[0x20; 32]);
+    let policy_hash = BytesN::from_array(&env, &[0x30; 32]);
+    let receipt_hash = BytesN::from_array(&env, &[0x40; 32]);
+    let receipt_version = 7_u32;
+    let payload = (
+        1_u32,
+        Symbol::new(&env, "earnproof_consent_receipt"),
+        network_id.clone(),
+        registry.clone(),
+        proof_id.clone(),
+        policy_hash.clone(),
+        receipt_version,
+        receipt_hash.clone(),
+    )
+        .to_xdr(&env);
+    let commitment = disclosure_consent_commitment(
+        &env,
+        &network_id,
+        &registry,
+        &proof_id,
+        &policy_hash,
+        receipt_version,
+        &receipt_hash,
+    );
+
+    assert_eq!(commitment, env.crypto().sha256(&payload).to_bytes());
+    let commitment_hex = commitment
+        .iter()
+        .map(|byte| std::format!("{byte:02x}"))
+        .collect::<std::string::String>();
+    assert_eq!(
+        commitment_hex,
+        "f85f121c33ac83d60ed616d61305e712d161c98882cf193ad64de9ac041b23eb"
+    );
+
+    let other_network = BytesN::from_array(&env, &[0x11; 32]);
+    assert_ne!(
+        commitment,
+        disclosure_consent_commitment(
+            &env,
+            &other_network,
+            &registry,
+            &proof_id,
+            &policy_hash,
+            receipt_version,
+            &receipt_hash,
+        )
+    );
+    assert_ne!(
+        commitment,
+        disclosure_consent_commitment(
+            &env,
+            &network_id,
+            &Address::generate(&env),
+            &proof_id,
+            &policy_hash,
+            receipt_version,
+            &receipt_hash,
+        )
+    );
+    assert_ne!(
+        commitment,
+        disclosure_consent_commitment(
+            &env,
+            &network_id,
+            &registry,
+            &BytesN::from_array(&env, &[0x21; 32]),
+            &policy_hash,
+            receipt_version,
+            &receipt_hash,
+        )
+    );
+    assert_ne!(
+        commitment,
+        disclosure_consent_commitment(
+            &env,
+            &network_id,
+            &registry,
+            &proof_id,
+            &BytesN::from_array(&env, &[0x31; 32]),
+            receipt_version,
+            &receipt_hash,
+        )
+    );
+    assert_ne!(
+        commitment,
+        disclosure_consent_commitment(
+            &env,
+            &network_id,
+            &registry,
+            &proof_id,
+            &policy_hash,
+            receipt_version + 1,
+            &receipt_hash,
+        )
+    );
+}
+
+#[test]
+fn consent_receipt_commitment_returned_by_contract_matches_shared_helper() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let issuer = Address::generate(&env);
+    let config_id = env.register(ProtocolConfigContract, ());
+    let config = ProtocolConfigContractClient::new(&env, &config_id);
+    config.initialize(&admin);
+    config.approve_schema_version(&1);
+    let issuer_registry_id = env.register(IssuerRegistryContract, ());
+    let issuers = IssuerRegistryContractClient::new(&env, &issuer_registry_id);
+    issuers.initialize(&admin);
+    let issuer_id_hash = BytesN::from_array(&env, &[0x61; 32]);
+    let metadata_hash = BytesN::from_array(&env, &[0x62; 32]);
+    issuers.register_issuer(&issuer_id_hash, &issuer, &metadata_hash, &metadata_hash);
+    let proof_registry_id = env.register(ProofRegistryContract, ());
+    let proofs = ProofRegistryContractClient::new(&env, &proof_registry_id);
+    proofs.initialize(&admin, &issuer_registry_id, &config_id);
+
+    let proof_id = BytesN::from_array(&env, &[0x63; 32]);
+    let policy_hash = BytesN::from_array(&env, &[0x64; 32]);
+    let receipt_hash = BytesN::from_array(&env, &[0x65; 32]);
+    proofs.register_proof(
+        &proof_id,
+        &BytesN::from_array(&env, &[0x66; 32]),
+        &issuer,
+        &1,
+        &(env.ledger().timestamp() + 1_000),
+    );
+
+    let actual = proofs.commit_disclosure_consent(&proof_id, &policy_hash, &3, &receipt_hash);
+    let expected = disclosure_consent_commitment(
+        &env,
+        &env.ledger().network_id(),
+        &proof_registry_id,
+        &proof_id,
+        &policy_hash,
+        3,
+        &receipt_hash,
+    );
+
+    assert_eq!(actual, expected);
+    assert!(proofs.has_consent_receipt_commitment(&expected));
 }
 
 /// The u32/u64 big-endian integer vectors from `vectors.tsv`

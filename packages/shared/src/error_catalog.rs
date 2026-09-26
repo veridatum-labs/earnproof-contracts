@@ -155,7 +155,7 @@ pub struct ErrorSpec {
 }
 
 /// Every published error, ordered by code.
-pub const ERROR_CATALOG: [ErrorSpec; 25] = [
+pub const ERROR_CATALOG: [ErrorSpec; 26] = [
     ErrorSpec {
         code: 1,
         name: "AlreadyInitialized",
@@ -455,6 +455,18 @@ pub const ERROR_CATALOG: [ErrorSpec; 25] = [
         remediation: "Validate the proof input data against the schema before resubmitting. Ensure all required fields are present and data sizes conform to the schema limits.",
         http_status: 400,
         client_message: "Malformed proof input",
+    },
+    ErrorSpec {
+        code: 311,
+        name: "ConsentReceiptAlreadyCommitted",
+        enum_name: "ProofError",
+        domain: Domain::ProofRegistry,
+        status: Status::Returned,
+        cause: "commit_disclosure_consent was called with a commitment already indexed by the proof registry.",
+        retry: Retry::Never,
+        remediation: "Treat the consent receipt commitment as already recorded. Use a distinct salted receipt hash or receipt version for a different receipt.",
+        http_status: 409,
+        client_message: "Consent receipt already committed",
     },
 ];
 

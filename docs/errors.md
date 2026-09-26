@@ -104,6 +104,7 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 308 | `IssuerInactive` | `ProofError` | proof-registry | returned | after-operator-action | 403 |
 | 309 | `UnsupportedSchema` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
 | 310 | `MalformedInput` | `ProofError` | proof-registry | reserved | after-caller-change | 400 |
+| 311 | `ConsentReceiptAlreadyCommitted` | `ProofError` | proof-registry | returned | never | 409 |
 
 ## Details
 
@@ -381,5 +382,16 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Remediation: Validate the proof input data against the schema before resubmitting. Ensure all required fields are present and data sizes conform to the schema limits.
 - Suggested HTTP status: 400
 - Client message: "Malformed proof input"
+
+### 311 - `ConsentReceiptAlreadyCommitted`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: commit_disclosure_consent was called with a commitment already indexed by the proof registry.
+- Remediation: Treat the consent receipt commitment as already recorded. Use a distinct salted receipt hash or receipt version for a different receipt.
+- Suggested HTTP status: 409
+- Client message: "Consent receipt already committed"
 
 <!-- END GENERATED -->

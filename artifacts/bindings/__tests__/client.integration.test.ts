@@ -295,6 +295,14 @@ describe('EarnProofClient integration', () => {
       expect(typeof client.isRevoked).toBe('function');
     });
 
+    it('has commitDisclosureConsent method', () => {
+      expect(typeof client.commitDisclosureConsent).toBe('function');
+    });
+
+    it('has hasConsentReceiptCommitment method', () => {
+      expect(typeof client.hasConsentReceiptCommitment).toBe('function');
+    });
+
     it('has getAdminProofRegistry method', () => {
       expect(typeof client.getAdminProofRegistry).toBe('function');
     });

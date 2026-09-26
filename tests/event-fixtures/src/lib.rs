@@ -211,31 +211,34 @@ fn issuer_registry_fixture_matches_contract_version() {
 }
 
 // ---------------------------------------------------------------------------
-// Proof-registry: no events currently
+// Proof-registry: consent commitment event
 // ---------------------------------------------------------------------------
 
 #[test]
-fn proof_registry_no_events_fixture_exists() {
+fn proof_registry_consent_event_fixture_exists() {
     let base = fixtures_dir();
-    let path = format!("{base}/proof-registry/v1/events.json");
+    let path = format!("{base}/proof-registry/v1/consent-receipt-committed.json");
     assert!(Path::new(&path).exists(), "missing fixture: {path}");
 }
 
 #[test]
-fn proof_registry_no_events_fixture_valid() {
+fn proof_registry_consent_event_fixture_valid() {
     let base = fixtures_dir();
-    let path = format!("{base}/proof-registry/v1/events.json");
-    let fixture = load_no_events_fixture(&path);
+    let path = format!("{base}/proof-registry/v1/consent-receipt-committed.json");
+    let fixture = load_fixture(&path);
     assert_eq!(fixture.contract, "proof-registry");
-    assert!(fixture.events.is_empty());
+    assert_eq!(fixture.event, "ConsentReceiptCommitted");
+    assert_eq!(fixture.topics, ["ConsentReceiptCommitted"]);
+    assert_eq!(fixture.emitted_by, "commit_disclosure_consent");
+    assert_eq!(fixture.payload.len(), 4);
 }
 
 #[test]
 fn proof_registry_fixture_matches_contract_version() {
     let version = read_contract_version("proof-registry");
     let base = fixtures_dir();
-    let path = format!("{base}/proof-registry/v1/events.json");
-    let fixture = load_no_events_fixture(&path);
+    let path = format!("{base}/proof-registry/v1/consent-receipt-committed.json");
+    let fixture = load_fixture(&path);
     assert_eq!(fixture.contract_version, version);
 }
 

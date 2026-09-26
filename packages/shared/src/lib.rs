@@ -46,6 +46,61 @@ pub struct MigrationStatus {
 /// Canonical configuration digest payload version.
 pub const CONFIG_DIGEST_VERSION: u32 = 1;
 
+/// Version tag mixed into every computed genesis identifier so a future
+/// change to the derivation scheme is distinguishable from a collision.
+pub const GENESIS_ID_VERSION: u32 = 1;
+
+/// Fallback maximum auxiliary payload size (in bytes) applied to a schema
+/// version that has no explicit override configured in protocol-config.
+pub const DEFAULT_SCHEMA_PAYLOAD_LIMIT: u32 = 4096;
+
+/// Computes a deterministic, domain-separated genesis identifier for a
+/// contract instance.
+///
+/// The identifier is derived from a version tag, a role-specific domain
+/// symbol (e.g. `"earnproof_proof_registry"`), the network passphrase
+/// digest, and this contract's own address. Because the domain differs per
+/// contract role and the network id differs per network, two instances can
+/// never share an identity by accident, even if deployed from the same WASM
+/// to the same address space on different networks.
+///
+/// The result is immutable by construction: every input is fixed at the
+/// moment `initialize` runs and never changes afterwards.
+pub fn compute_genesis_id(env: &Env, domain: &str) -> BytesN<32> {
+    let payload = (
+        GENESIS_ID_VERSION,
+        Symbol::new(env, domain),
+        env.ledger().network_id(),
+        env.current_contract_address(),
+    )
+        .to_xdr(env);
+    env.crypto().sha256(&payload).to_bytes()
+}
+
+/// Immutable deployment identity, written once during `initialize` and
+/// carried unchanged across upgrades and storage migrations.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GenesisRecord {
+    /// Domain-separated identifier computed by [`compute_genesis_id`].
+    pub genesis_id: BytesN<32>,
+    /// Ledger sequence at which `initialize` committed this record.
+    pub initialized_at_ledger: u32,
+}
+
+/// Bounded record of an auxiliary proof payload accepted alongside a
+/// registration. Only the length and a commitment hash are kept on-chain;
+/// the raw payload itself is never stored, so resource use stays bounded
+/// regardless of the configured schema limit.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofPayloadRecord {
+    /// Length in bytes of the auxiliary payload supplied at registration.
+    pub payload_len: u32,
+    /// SHA-256 hash of the auxiliary payload.
+    pub payload_hash: BytesN<32>,
+}
+
 pub fn protocol_config_digest(
     env: &Env,
     admin: &Address,
@@ -268,6 +323,48 @@ pub enum ProofError {
     /// Distinct from unsupported schema — the input itself is invalid.
     /// Recovery: validate input against the schema before resubmitting.
     MalformedInput = 310,
+}
+
+/// Fixed capacity of the protocol-config change-history ring. Once this many
+/// entries have been recorded, the oldest entry is overwritten by the next
+/// append — rollover is deterministic rather than unbounded growth.
+pub const CONFIG_HISTORY_CAPACITY: u32 = 32;
+
+/// Maximum number of entries a single `get_config_history` call may return,
+/// regardless of the requested limit, so a query cannot be used to force an
+/// unbounded read.
+pub const MAX_CONFIG_HISTORY_PAGE: u32 = 20;
+
+/// Category of a recorded protocol-config change. Distinct from the raw
+/// parameter value: history entries carry only this tag, a commitment to the
+/// changed value, and version/ledger metadata — never the sensitive value
+/// itself.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ConfigChangeCategory {
+    AdminRotation,
+    PauseToggle,
+    ScopedPause,
+    SchemaApproval,
+    SchemaDeprecation,
+    SchemaPayloadLimit,
+}
+
+/// One bounded, on-chain summary of a governance change, as stored in the
+/// change-history ring.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigChangeSummary {
+    /// What kind of change this was.
+    pub category: ConfigChangeCategory,
+    /// Commitment to the changed value(s); never the raw value.
+    pub proposal_commitment: BytesN<32>,
+    /// Configuration version in effect immediately after this change.
+    pub config_version: u32,
+    /// Ledger sequence at which the change committed.
+    pub ledger: u32,
+    /// Ledger timestamp at which the change committed.
+    pub timestamp: u64,
 }
 
 #[contracttype]

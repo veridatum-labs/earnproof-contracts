@@ -113,10 +113,18 @@ pub fn build(name: &str) -> Scenario {
     let mut recorder = Recorder::new();
 
     // --- initialized: provisioned, holding no records -----------------------
-    recorder.after(&env, || config.initialize(&admin));
-    recorder.after(&env, || config.approve_schema_version(&SCHEMA_VERSION));
-    recorder.after(&env, || issuers.initialize(&admin));
-    recorder.after(&env, || proofs.initialize(&admin, &issuers_id, &config_id));
+    recorder.after(&env, || {
+        config.initialize(&admin);
+    });
+    recorder.after(&env, || {
+        config.approve_schema_version(&bytes32(&env, 0x10), &SCHEMA_VERSION);
+    });
+    recorder.after(&env, || {
+        issuers.initialize(&admin);
+    });
+    recorder.after(&env, || {
+        proofs.initialize(&admin, &issuers_id, &config_id);
+    });
 
     if name != "initialized" {
         // --- active: one issuer, one valid proof ---------------------------
@@ -142,11 +150,13 @@ pub fn build(name: &str) -> Scenario {
     match name {
         "initialized" | "active" => {}
         // --- paused: the emergency brake engaged ---------------------------
-        "paused" => recorder.after(&env, || config.pause()),
+        "paused" => recorder.after(&env, || config.pause(&bytes32(&env, 0x11))),
         // --- revoked: both terminal states reached -------------------------
         "revoked" => {
             recorder.after(&env, || proofs.revoke_proof(&bytes32(&env, PROOF_ID)));
-            recorder.after(&env, || issuers.revoke_issuer(&bytes32(&env, ISSUER_ID)));
+            recorder.after(&env, || {
+                issuers.revoke_issuer(&bytes32(&env, 0x12), &bytes32(&env, ISSUER_ID));
+            });
         }
         // --- expired: ledger time past the proof expiration ----------------
         //

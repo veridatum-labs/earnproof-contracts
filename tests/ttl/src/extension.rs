@@ -170,8 +170,8 @@ fn no_contract_uses_temporary_storage() {
     let deployment = deployment();
     deployment.register_proof(FAR_FUTURE);
     deployment.proofs.revoke_proof(&bytes(&deployment.env, 5));
-    deployment.config.pause();
-    deployment.config.unpause();
+    deployment.config.pause(&bytes(&deployment.env, 0x11));
+    deployment.config.unpause(&bytes(&deployment.env, 0x12));
 
     for contract in [
         &deployment.config_id,

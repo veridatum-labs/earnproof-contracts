@@ -1,7 +1,7 @@
 # scenario: revoked
-# revision: 6
-# reason: Update ledger snapshots for merged feature branch
-# body-digest: 0250f9429cd79549842a2cacd4c8c598d0dfead03d1be299f04ab28953db9827
+# revision: 7
+# reason: Add proposal_id and replay protection to governed functions
+# body-digest: 6c2d127313909716f7467b9abab56b2de0e41b9517c38f8ef67278bf303b7a47
 
 [ledger]
 sequence = 1000
@@ -13,6 +13,7 @@ issuer-registry instance [sym:ContractVersion] = u32:1
 issuer-registry instance [sym:InstanceLiveUntil] = u32:501000
 issuer-registry persistent [sym:AddressIssuer, addr:issuer] = bytes:1111111111111111111111111111111111111111111111111111111111111111
 issuer-registry persistent [sym:AddressTtl, addr:issuer] = u32:501000
+issuer-registry persistent [sym:ExecutedProposal, bytes:6efc3df746ea8e8bf5e5a0cedb92d09df5ec077ac0e45c1be289163acb9c73b1] = true
 issuer-registry persistent [sym:Issuer, bytes:1111111111111111111111111111111111111111111111111111111111111111] = {sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222, sym:provenance_commitment: bytes:6363636363636363636363636363636363636363636363636363636363636363, sym:status: [sym:Revoked], sym:updated_at: u64:1000}
 issuer-registry persistent [sym:IssuerTtl, bytes:1111111111111111111111111111111111111111111111111111111111111111] = u32:501000
 proof-registry instance [sym:Admin] = addr:admin
@@ -24,11 +25,12 @@ protocol-config instance [sym:Admin] = addr:admin
 protocol-config instance [sym:ConfigVersion] = u32:2
 protocol-config instance [sym:ContractVersion] = u32:1
 protocol-config instance [sym:Paused] = false
+protocol-config persistent [sym:ExecutedProposal, bytes:bd2559d3d43f153325b916353c0059949622b935a08085da636b9a94b2f7f9c5] = true
 protocol-config persistent [sym:SchemaVersion, u32:1] = true
 
 [events]
 protocol-config topics=[sym:initialized] data={sym:admin: addr:admin}
-protocol-config topics=[sym:schema_approved] data={sym:version: u32:1}
+protocol-config topics=[sym:schema_approved] data={sym:proposal_id: bytes:1010101010101010101010101010101010101010101010101010101010101010, sym:version: u32:1}
 issuer-registry topics=[sym:issuer_registered] data={sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222, sym:provenance_commitment: bytes:6363636363636363636363636363636363636363636363636363636363636363}
 issuer-registry topics=[sym:issuer_revoked] data={sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:updated_at: u64:1000}
 

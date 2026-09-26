@@ -42,7 +42,7 @@ fn deployment() -> Deployment {
     let config_id = env.register(ProtocolConfigContract, ());
     let config = ProtocolConfigContractClient::new(&env, &config_id);
     config.initialize(&admin);
-    config.approve_schema_version(&1);
+    config.approve_schema_version(&bytes32(&env, 0x10), &1);
 
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
@@ -114,7 +114,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     );
     observed.record(
         "protocol-config pause uninitialized",
-        code(fresh_config.try_pause()),
+        code(fresh_config.try_pause(&bytes32(env, 0x10))),
     );
     observed.record(
         "protocol-config initialize twice",
@@ -122,11 +122,19 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     );
     observed.record(
         "protocol-config approve_schema_version(0)",
-        code(initial_dep.config.try_approve_schema_version(&0)),
+        code(
+            initial_dep
+                .config
+                .try_approve_schema_version(&bytes32(env, 0x10), &0),
+        ),
     );
     observed.record(
         "protocol-config deprecate_schema_version(0)",
-        code(initial_dep.config.try_deprecate_schema_version(&0)),
+        code(
+            initial_dep
+                .config
+                .try_deprecate_schema_version(&bytes32(env, 0x10), &0),
+        ),
     );
 
     // --- issuer-registry -------------------------------------------------
@@ -180,7 +188,9 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
         &bytes32(env, 21),
         &bytes32(env, 99),
     );
-    initial_dep.issuers.revoke_issuer(&bytes32(env, 20));
+    initial_dep
+        .issuers
+        .revoke_issuer(&bytes32(env, 0x10), &bytes32(env, 20));
     observed.record(
         "issuer-registry update revoked issuer",
         code(
@@ -191,7 +201,11 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     );
     observed.record(
         "issuer-registry reactivate revoked issuer",
-        code(initial_dep.issuers.try_reactivate_issuer(&bytes32(env, 20))),
+        code(
+            initial_dep
+                .issuers
+                .try_reactivate_issuer(&bytes32(env, 0x10), &bytes32(env, 20)),
+        ),
     );
 
     // --- proof-registry --------------------------------------------------
@@ -272,7 +286,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     // 307: ContractPaused — pause the protocol then attempt registration.
     let deployment2 = deployment();
     let env2 = &deployment2.env;
-    deployment2.config.pause();
+    deployment2.config.pause(&bytes32(env2, 0x11));
     observed.record(
         "proof-registry contract paused",
         code(deployment2.proofs.try_register_proof(
@@ -287,7 +301,9 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     // 308: IssuerInactive — suspend the issuer then attempt registration.
     let deployment3 = deployment();
     let env3 = &deployment3.env;
-    deployment3.issuers.suspend_issuer(&bytes32(env3, 1));
+    deployment3
+        .issuers
+        .suspend_issuer(&bytes32(env3, 0x11), &bytes32(env3, 1));
     observed.record(
         "proof-registry issuer inactive",
         code(deployment3.proofs.try_register_proof(
@@ -343,7 +359,7 @@ fn a_paused_protocol_is_reported_as_contract_paused() {
     // documentation stays honest, and a future change that alters the pause
     // code has to update the catalog in the same change.
     let deployment = deployment();
-    deployment.config.pause();
+    deployment.config.pause(&bytes32(&deployment.env, 0x11));
 
     let result = deployment.proofs.try_register_proof(
         &bytes32(&deployment.env, 1),
@@ -372,7 +388,9 @@ fn a_suspended_issuer_is_reported_as_issuer_inactive() {
         &bytes32(env, 41),
         &bytes32(env, 99),
     );
-    deployment.issuers.suspend_issuer(&bytes32(env, 40));
+    deployment
+        .issuers
+        .suspend_issuer(&bytes32(env, 0x11), &bytes32(env, 40));
 
     let result = deployment.proofs.try_register_proof(
         &bytes32(env, 42),

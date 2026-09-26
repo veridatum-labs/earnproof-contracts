@@ -270,14 +270,20 @@ pub enum ProofError {
     MalformedInput = 310,
 }
 
-#[contracttype]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum PauseScope {
-    Global,
-    Registration,
-    Updates,
-    Revocation,
-    Upgrades,
+pub fn proposal_domain_key(
+    env: &Env,
+    contract_name: soroban_sdk::Symbol,
+    proposal_id: &BytesN<32>,
+) -> BytesN<32> {
+    let network_id = env.ledger().network_id();
+    let payload = (
+        soroban_sdk::Symbol::new(env, "earnproof_proposal_v1"),
+        network_id,
+        contract_name,
+        proposal_id.clone(),
+    )
+        .to_xdr(env);
+    env.crypto().sha256(&payload).to_bytes()
 }
 
 #[contracttype]

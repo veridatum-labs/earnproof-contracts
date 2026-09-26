@@ -169,7 +169,7 @@ fn proof_registry_accepts_backend_hashes_and_stores_them_queryable_by_the_same_k
     let config_id = env.register(ProtocolConfigContract, ());
     let config = ProtocolConfigContractClient::new(&env, &config_id);
     config.initialize(&admin);
-    config.approve_schema_version(&1);
+    config.approve_schema_version(&BytesN::from_array(&env, &[0x10; 32]), &1);
 
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
@@ -221,7 +221,7 @@ fn integer_vectors_match_the_values_accepted_by_real_contract_calls() {
     // schema-7 in vectors.tsv: source "7", big-endian hex "00000007".
     let schema_version: u32 = vector_hex_source("schema-7").parse().unwrap();
     assert_eq!(schema_version, 7);
-    config.approve_schema_version(&schema_version);
+    config.approve_schema_version(&BytesN::from_array(&env, &[0x10; 32]), &schema_version);
     assert!(config.is_schema_version_approved(&schema_version));
 
     // expiration-1700000000: a real Soroban ledger timestamp is a u64, the

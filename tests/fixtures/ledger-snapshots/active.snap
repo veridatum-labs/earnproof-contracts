@@ -1,7 +1,7 @@
 # scenario: active
-# revision: 6
-# reason: Update ledger snapshots for merged feature branch
-# body-digest: 415f748e6d7e2c834358604da449c6b37fb800fb58e1878a87bcdcf8694eeb7a
+# revision: 7
+# reason: Add proposal_id and replay protection to governed functions
+# body-digest: e7a570ee6461138d617f5240cd248d75a1abe17e2a3403010d98dd58cd3867e8
 
 [ledger]
 sequence = 1000
@@ -24,11 +24,12 @@ protocol-config instance [sym:Admin] = addr:admin
 protocol-config instance [sym:ConfigVersion] = u32:2
 protocol-config instance [sym:ContractVersion] = u32:1
 protocol-config instance [sym:Paused] = false
+protocol-config persistent [sym:ExecutedProposal, bytes:bd2559d3d43f153325b916353c0059949622b935a08085da636b9a94b2f7f9c5] = true
 protocol-config persistent [sym:SchemaVersion, u32:1] = true
 
 [events]
 protocol-config topics=[sym:initialized] data={sym:admin: addr:admin}
-protocol-config topics=[sym:schema_approved] data={sym:version: u32:1}
+protocol-config topics=[sym:schema_approved] data={sym:proposal_id: bytes:1010101010101010101010101010101010101010101010101010101010101010, sym:version: u32:1}
 issuer-registry topics=[sym:issuer_registered] data={sym:created_at: u64:1000, sym:issuer_address: addr:issuer, sym:issuer_id_hash: bytes:1111111111111111111111111111111111111111111111111111111111111111, sym:metadata_hash: bytes:2222222222222222222222222222222222222222222222222222222222222222, sym:provenance_commitment: bytes:6363636363636363636363636363636363636363636363636363636363636363}
 
 [verdicts]

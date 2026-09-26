@@ -5,6 +5,11 @@
   "schema_version": 1,
   "topics": ["Paused"],
   "payload": {
+    "proposal_id": {
+      "type": "BytesN<32>",
+      "description": "Governance proposal identifier.",
+      "example": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
     "paused": {
       "type": "Bool",
       "description": "Always true when this event is emitted.",

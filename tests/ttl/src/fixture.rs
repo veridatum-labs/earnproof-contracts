@@ -133,7 +133,7 @@ pub fn deployment() -> Deployment {
     let config_id = env.register(ProtocolConfigContract, ());
     let config = ProtocolConfigContractClient::new(&env, &config_id);
     config.initialize(&admin);
-    config.approve_schema_version(&SCHEMA_VERSION);
+    config.approve_schema_version(&bytes(&env, 0x10), &SCHEMA_VERSION);
 
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);

@@ -191,9 +191,9 @@ fn the_referenced_protocol_config_gates_registration_not_a_newer_deployment() {
     let newer_id = deployment.env.register(ProtocolConfigContract, ());
     let newer = ProtocolConfigContractClient::new(&deployment.env, &newer_id);
     newer.initialize(&deployment.admin);
-    newer.approve_schema_version(&APPROVED_SCHEMA);
+    newer.approve_schema_version(&hash(&deployment.env, 0x10), &APPROVED_SCHEMA);
 
-    deployment.config.pause();
+    deployment.config.pause(&hash(&deployment.env, 0x11));
     assert!(!newer.is_paused());
 
     let rejection = deployment.assert_rejected_and_atomic(&hash(&deployment.env, 0xA9));

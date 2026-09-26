@@ -155,7 +155,7 @@ pub struct ErrorSpec {
 }
 
 /// Every published error, ordered by code.
-pub const ERROR_CATALOG: [ErrorSpec; 25] = [
+pub const ERROR_CATALOG: [ErrorSpec; 26] = [
     ErrorSpec {
         code: 1,
         name: "AlreadyInitialized",
@@ -455,6 +455,18 @@ pub const ERROR_CATALOG: [ErrorSpec; 25] = [
         remediation: "Validate the proof input data against the schema before resubmitting. Ensure all required fields are present and data sizes conform to the schema limits.",
         http_status: 400,
         client_message: "Malformed proof input",
+    },
+    ErrorSpec {
+        code: 311,
+        name: "UnsupportedProofType",
+        enum_name: "ProofError",
+        domain: Domain::ProofRegistry,
+        status: Status::Returned,
+        cause: "The proof type identifier is not supported by the protocol config.",
+        retry: Retry::AfterOperatorAction,
+        remediation: "Call is_proof_type_approved on the protocol config contract to verify the proof type is approved. An operator must approve the proof type before it can be used for proof registration.",
+        http_status: 400,
+        client_message: "Proof type not supported",
     },
 ];
 

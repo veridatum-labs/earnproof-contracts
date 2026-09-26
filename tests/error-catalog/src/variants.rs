@@ -132,6 +132,11 @@ fn declared_variants() -> std::vec::Vec<(&'static str, &'static str, u32)> {
             "MalformedInput",
             ProofError::MalformedInput as u32,
         ),
+        (
+            "ProofError",
+            "UnsupportedProofType",
+            ProofError::UnsupportedProofType as u32,
+        ),
     ]
 }
 

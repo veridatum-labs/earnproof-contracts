@@ -58,7 +58,12 @@ fn apply(deployment: &Deployment, update: Update) {
         Update::Pause => deployment.config.pause(),
         Update::Unpause => deployment.config.unpause(),
         Update::DeprecateSchema => deployment.config.deprecate_schema_version(&APPROVED_SCHEMA),
-        Update::ApproveSchema => deployment.config.approve_schema_version(&APPROVED_SCHEMA),
+        Update::ApproveSchema => {
+            deployment.config.approve_schema_version(&APPROVED_SCHEMA);
+            deployment
+                .config
+                .approve_proof_type(&soroban_sdk::BytesN::from_array(&deployment.env, &[1; 32]));
+        }
         Update::SuspendIssuer => deployment.issuers.suspend_issuer(&deployment.issuer_id),
         Update::ReactivateIssuer => deployment.issuers.reactivate_issuer(&deployment.issuer_id),
         Update::RevokeIssuer => deployment.issuers.revoke_issuer(&deployment.issuer_id),
@@ -86,6 +91,7 @@ fn attempt(deployment: &Deployment, discriminator: u8) -> bool {
             &deployment.issuer,
             &APPROVED_SCHEMA,
             &deployment.expiry(),
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1; 32]),
         )
     });
     rejection == Rejection::Accepted

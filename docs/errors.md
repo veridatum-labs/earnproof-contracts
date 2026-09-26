@@ -104,6 +104,7 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 308 | `IssuerInactive` | `ProofError` | proof-registry | returned | after-operator-action | 403 |
 | 309 | `UnsupportedSchema` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
 | 310 | `MalformedInput` | `ProofError` | proof-registry | reserved | after-caller-change | 400 |
+| 311 | `UnsupportedProofType` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
 
 ## Details
 
@@ -381,5 +382,16 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Remediation: Validate the proof input data against the schema before resubmitting. Ensure all required fields are present and data sizes conform to the schema limits.
 - Suggested HTTP status: 400
 - Client message: "Malformed proof input"
+
+### 311 - `UnsupportedProofType`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: The proof type identifier is not supported by the protocol config.
+- Remediation: Call is_proof_type_approved on the protocol config contract to verify the proof type is approved. An operator must approve the proof type before it can be used for proof registration.
+- Suggested HTTP status: 400
+- Client message: "Proof type not supported"
 
 <!-- END GENERATED -->

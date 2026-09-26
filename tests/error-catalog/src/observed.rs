@@ -43,6 +43,7 @@ fn deployment() -> Deployment {
     let config = ProtocolConfigContractClient::new(&env, &config_id);
     config.initialize(&admin);
     config.approve_schema_version(&1);
+    config.approve_proof_type(&soroban_sdk::BytesN::from_array(&env, &[1; 32]));
 
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
@@ -217,6 +218,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
         &initial_dep.issuer,
         &1,
         &FAR_FUTURE,
+        &soroban_sdk::BytesN::from_array(&initial_dep.env, &[1; 32]),
     );
     observed.record(
         "proof-registry duplicate proof id",
@@ -226,6 +228,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &initial_dep.issuer,
             &1,
             &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env, &[1; 32]),
         )),
     );
     observed.record(
@@ -245,6 +248,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &initial_dep.issuer,
             &1,
             &0,
+            &soroban_sdk::BytesN::from_array(env, &[1; 32]),
         )),
     );
     observed.record(
@@ -255,6 +259,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &initial_dep.issuer,
             &0,
             &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env, &[1; 32]),
         )),
     );
     observed.record(
@@ -265,6 +270,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &initial_dep.issuer,
             &7,
             &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env, &[1; 32]),
         )),
     );
 
@@ -281,6 +287,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &deployment2.issuer,
             &1,
             &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env2, &[1; 32]),
         )),
     );
 
@@ -296,6 +303,7 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &deployment3.issuer,
             &1,
             &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env3, &[1; 32]),
         )),
     );
 
@@ -310,6 +318,22 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &deployment4.issuer,
             &7,
             &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env4, &[1; 32]),
+        )),
+    );
+
+    // 311: UnsupportedProofType — use an unapproved proof type.
+    let deployment5 = deployment();
+    let env5 = &deployment5.env;
+    observed.record(
+        "proof-registry unsupported proof type",
+        code(deployment5.proofs.try_register_proof(
+            &bytes32(env5, 70),
+            &bytes32(env5, 71),
+            &deployment5.issuer,
+            &1,
+            &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env5, &[99; 32]),
         )),
     );
 
@@ -351,6 +375,7 @@ fn a_paused_protocol_is_reported_as_contract_paused() {
         &deployment.issuer,
         &1,
         &FAR_FUTURE,
+        &soroban_sdk::BytesN::from_array(&deployment.env, &[1; 32]),
     );
 
     assert_eq!(result, Err(Ok(ProofError::ContractPaused)));
@@ -380,6 +405,7 @@ fn a_suspended_issuer_is_reported_as_issuer_inactive() {
         &suspended,
         &1,
         &FAR_FUTURE,
+        &soroban_sdk::BytesN::from_array(&deployment.env, &[1; 32]),
     );
 
     assert_eq!(result, Err(Ok(ProofError::IssuerInactive)));
@@ -404,6 +430,7 @@ fn an_uninitialized_proof_registry_reports_proof_not_found_and_writes_nothing() 
         &issuer,
         &1,
         &FAR_FUTURE,
+        &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
     );
 
     assert_eq!(result, Err(Ok(ProofError::ProofNotFound)));
@@ -425,6 +452,7 @@ fn a_registry_pointed_at_an_empty_config_reports_unsupported_schema() {
         &deployment.issuer,
         &1,
         &FAR_FUTURE,
+        &soroban_sdk::BytesN::from_array(&deployment.env, &[1; 32]),
     );
 
     assert_eq!(result, Err(Ok(ProofError::UnsupportedSchema)));

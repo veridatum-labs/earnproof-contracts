@@ -17,6 +17,21 @@ pub const TTL_THRESHOLD_LEDGERS: u32 = 50_000;
 /// Target ledgers for extended TTL after triggering a preemptive extension.
 pub const TTL_EXTEND_TO_LEDGERS: u32 = 500_000;
 
+/// Sentinel written into ledger-sequence metadata fields for records that were
+/// created before those fields existed (legacy records). A live ledger
+/// sequence is always >= 1, so `0` is an unambiguous "unknown / not recorded"
+/// marker that consumers can detect and treat as legacy.
+pub const LEDGER_SEQUENCE_UNSET: u32 = 0;
+
+/// Sentinel written into ledger-timestamp metadata fields for legacy records.
+/// A live ledger timestamp is always > 0, so `0` unambiguously marks
+/// "unknown / not recorded".
+pub const LEDGER_TIMESTAMP_UNSET: u64 = 0;
+
+/// Initial metadata revision assigned to an issuer at registration. Each
+/// accepted metadata update increments the revision by one.
+pub const METADATA_REVISION_INITIAL: u32 = 1;
+
 /// Minimum ledgers between approval and execution (timelock).
 /// Prevents immediate execution of just-approved upgrades.
 /// ~1 day at 5s/ledger = 17,280 ledgers
@@ -237,6 +252,7 @@ pub enum IssuerError {
     IssuerInactive = 205,
     InvalidTransition = 206,
     InvalidAddress = 207,
+    InvalidMetadataCommitment = 208,
 }
 
 /// Proof-specific errors (300-399).
@@ -295,6 +311,32 @@ pub enum ProofStatus {
     Revoked,
 }
 
+/// Structured proof validity outcome.
+///
+/// A single boolean (`is_valid_proof`) cannot distinguish why a proof is
+/// invalid. `ProofValidity` maps every invalid state to exactly one primary
+/// reason, evaluated in a documented, deterministic order (see
+/// `ProofRegistryContract::proof_validity`):
+///
+/// 1. `Unknown`         — no record exists for the given id.
+/// 2. `Revoked`         — the record's status is `Revoked`.
+/// 3. `Expired`         — the record's `expires_at` is at or before now.
+/// 4. `IssuerInactive`  — the issuing address is no longer active.
+/// 5. `SchemaDeprecated`— the record's schema version is no longer approved.
+/// 6. `Valid`           — none of the above; the proof is currently valid.
+///
+/// When several invalid conditions hold at once, the earliest one in this
+/// order is the primary reason. The variants are ordered so the canonical
+/// precedence is also the declaration order.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProofValidity {
+    Valid,
+    Unknown,
+    Revoked,
+    Expired,
+    IssuerInactive,
+    SchemaDeprecated,
 /// Stores temporal metadata for an upgrade approval.
 ///
 /// # Timing invariants
@@ -324,11 +366,30 @@ pub struct UpgradeApproval {
 pub struct IssuerRecord {
     pub issuer_id_hash: BytesN<32>,
     pub issuer_address: Address,
+    /// Hash commitment over the canonical issuer metadata document (content
+    /// hash). See the `metadata-commitment` docs for the domain-separation
+    /// and canonical-byte rules a backend must follow to reproduce it.
     pub metadata_hash: BytesN<32>,
+    /// Hash commitment over the canonical metadata document URI (location
+    /// hash), stored separately from `metadata_hash` so off-chain resolvers
+    /// can distinguish a change of location from a change of content. A value
+    /// of all-zero bytes is the documented "no URI commitment recorded"
+    /// sentinel (used for records registered before a URI commitment was set).
+    pub metadata_uri_hash: BytesN<32>,
+    /// Monotonically increasing revision, starting at
+    /// [`METADATA_REVISION_INITIAL`]. Each accepted metadata update increments
+    /// it by one.
+    pub metadata_revision: u32,
     pub provenance_commitment: BytesN<32>,
     pub status: IssuerStatus,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Ledger sequence at which the current `status` became effective.
+    /// [`LEDGER_SEQUENCE_UNSET`] marks a legacy record predating this field.
+    pub status_effective_ledger: u32,
+    /// Ledger timestamp at which the current `status` became effective.
+    /// [`LEDGER_TIMESTAMP_UNSET`] marks a legacy record predating this field.
+    pub status_effective_timestamp: u64,
 }
 
 #[contracttype]
@@ -342,6 +403,9 @@ pub struct ProofRecord {
     pub expires_at: u64,
     pub created_at: u64,
     pub revoked_at: u64,
+    /// Ledger sequence at which this proof was created (registered).
+    /// [`LEDGER_SEQUENCE_UNSET`] marks a legacy record predating this field.
+    pub created_ledger: u32,
 }
 
 #[contracttype]

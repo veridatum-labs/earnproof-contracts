@@ -1,5 +1,7 @@
 # scenario: initialized
 # revision: 6
+# reason: records now carry proof created_ledger and issuer metadata_uri_hash, metadata_revision, and status effective ledger metadata, and proof-registry emits proof_registered
+# body-digest: fd686c9a61fb59263b1659bfe34e10856998725fbb0d11b66de85703a4da1cf3
 # reason: Update ledger snapshots for merged feature branch
 # body-digest: 2afb4dd02cefed5049b6c79f3245b3aba69fb6980a5d06b22347d271acac8f6d
 

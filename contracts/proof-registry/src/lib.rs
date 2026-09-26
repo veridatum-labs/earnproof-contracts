@@ -67,6 +67,19 @@ pub struct ContractUpgraded {
     pub upgraded_by: Address,
 }
 
+/// Emitted when a proof is registered.
+///
+/// Carries the on-chain creation timing (`created_ledger` and `created_at`)
+/// so indexers can record deterministic audit timestamps without a follow-up
+/// query. Both values are sourced from the host ledger environment.
+#[contractevent]
+pub struct ProofRegistered {
+    pub proof_id_hash: BytesN<32>,
+    pub issuer_address: Address,
+    pub schema_version: u32,
+    pub created_ledger: u32,
+    pub created_at: u64,
+    pub expires_at: u64,
 #[contractevent]
 pub struct SuccessorNominated {
     pub successor: Address,
@@ -238,20 +251,36 @@ impl ProofRegistryContract {
             return Err(ProofError::ProofAlreadyRegistered);
         }
 
+        // Creation timing is sourced only from the host ledger environment so
+        // it is deterministic and non-forgeable by the caller. The proof
+        // record and its timing are written together in a single persistent
+        // `set`, so a proof never exists without its creation metadata.
         let now = env.ledger().timestamp();
+        let created_ledger = env.ledger().sequence();
         let record = ProofRecord {
-            proof_id_hash,
+            proof_id_hash: proof_id_hash.clone(),
             commitment_hash,
-            issuer_address,
+            issuer_address: issuer_address.clone(),
             status: ProofStatus::Active,
             schema_version,
             expires_at,
             created_at: now,
             revoked_at: 0,
+            created_ledger,
         };
 
         env.storage().persistent().set(&key, &record);
-        Self::extend_proof_key_ttl(env, &key);
+        Self::extend_proof_key_ttl(env.clone(), &key);
+
+        ProofRegistered {
+            proof_id_hash,
+            issuer_address,
+            schema_version,
+            created_ledger,
+            created_at: now,
+            expires_at,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -274,6 +303,14 @@ impl ProofRegistryContract {
         Ok(record)
     }
 
+    /// Legacy boolean validity helper, retained for compatibility.
+    ///
+    /// It reflects only the two locally-checkable conditions (status and
+    /// expiry). For the full, structured reason — including issuer-inactive
+    /// and deprecated-schema outcomes that require cross-contract reads — use
+    /// [`Self::proof_validity`]. `is_valid_proof` returns `true` exactly when
+    /// `proof_validity` would return one of `Valid`, `IssuerInactive`, or
+    /// `SchemaDeprecated` (i.e. the record is present, active, and unexpired).
     pub fn is_valid_proof(env: Env, proof_id_hash: BytesN<32>) -> bool {
         match Self::get_proof(env.clone(), proof_id_hash) {
             Ok(record) => {
@@ -282,6 +319,60 @@ impl ProofRegistryContract {
             }
             Err(_) => false,
         }
+    }
+
+    /// Structured proof validity query.
+    ///
+    /// Returns exactly one [`ProofValidity`] reason, applying this canonical,
+    /// deterministic order so that when several invalid conditions hold at
+    /// once the earliest one is the reported primary reason:
+    ///
+    /// 1. `Unknown`          — no record exists for `proof_id_hash`.
+    /// 2. `Revoked`          — the record's status is `Revoked`.
+    /// 3. `Expired`          — now is strictly after the record's `expires_at`.
+    /// 4. `IssuerInactive`   — the issuing address is not currently active.
+    /// 5. `SchemaDeprecated` — the record's schema version is not approved.
+    /// 6. `Valid`            — none of the above.
+    ///
+    /// The query is read-only. Its only side effect is the documented TTL
+    /// extension performed by [`Self::get_proof`] when the record exists;
+    /// absent, revoked, and expired proofs are resolved without any
+    /// cross-contract call. If the contract's dependency addresses cannot be
+    /// resolved (uninitialized contract), validity cannot be asserted and
+    /// `Unknown` is returned.
+    pub fn proof_validity(env: Env, proof_id_hash: BytesN<32>) -> ProofValidity {
+        let record = match Self::get_proof(env.clone(), proof_id_hash) {
+            Ok(record) => record,
+            Err(_) => return ProofValidity::Unknown,
+        };
+
+        if record.status == ProofStatus::Revoked {
+            return ProofValidity::Revoked;
+        }
+
+        if env.ledger().timestamp() > record.expires_at {
+            return ProofValidity::Expired;
+        }
+
+        let issuer_registry = match Self::get_issuer_registry(env.clone()) {
+            Ok(address) => address,
+            Err(_) => return ProofValidity::Unknown,
+        };
+        let issuer_client = IssuerRegistryContractClient::new(&env, &issuer_registry);
+        if !issuer_client.is_active_address(&record.issuer_address) {
+            return ProofValidity::IssuerInactive;
+        }
+
+        let protocol_config = match Self::get_protocol_config(env.clone()) {
+            Ok(address) => address,
+            Err(_) => return ProofValidity::Unknown,
+        };
+        let protocol_client = ProtocolConfigContractClient::new(&env, &protocol_config);
+        if !protocol_client.is_schema_version_approved(&record.schema_version) {
+            return ProofValidity::SchemaDeprecated;
+        }
+
+        ProofValidity::Valid
     }
 
     pub fn is_revoked(env: Env, proof_id_hash: BytesN<32>) -> bool {
@@ -608,7 +699,10 @@ mod test {
     use earnproof_shared::{ProofError, ProofStatus, TTL_THRESHOLD_LEDGERS};
     use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};
     use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
-    use soroban_sdk::{testutils::storage::Persistent as _, Address, BytesN, Env};
+    use soroban_sdk::{
+        testutils::{storage::Persistent as _, Ledger as _},
+        Address, BytesN, Env,
+    };
 
     const ADMIN: &str = "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR";
     const ISSUER: &str = "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U";
@@ -1756,5 +1850,188 @@ mod test {
         assert!(pc_client.is_paused());
         pc_client.unpause();
         assert!(!pc_client.is_paused());
+    }
+
+    #[test]
+    fn configuration_digest_matches_host_helper_and_version_changes() {
+        let (env, client, _pc, _ir, ir_id) = setup();
+        let admin = client.get_admin();
+        let protocol_config = client.get_protocol_config();
+        let initial = client.get_config_digest();
+        assert_eq!(
+            ProofRegistryContractClient::get_config_digest_version(&client),
+            earnproof_shared::CONFIG_DIGEST_VERSION
+        );
+        assert_eq!(
+            initial,
+            earnproof_shared::proof_registry_digest(&env, &admin, &ir_id, &protocol_config, 1,)
+        );
+
+        let wasm_hash = bytes(&env, 0xd2);
+        client.approve_upgrade(&wasm_hash, &2);
+        client.upgrade_contract(&wasm_hash);
+        assert_ne!(client.get_config_digest(), initial);
+    }
+
+    #[test]
+    fn ttl_status_tracks_only_caller_named_proof_entries() {
+        let (env, client, _protocol_config, _issuer_registry, _issuer_registry_id) = setup();
+        let proof_id = bytes(&env, 0xe4);
+        let unknown_id = bytes(&env, 0xe5);
+        let issuer = Address::from_str(&env, ISSUER);
+
+        assert_eq!(
+            client.get_instance_ttl_status().health,
+            earnproof_shared::TtlHealth::Healthy
+        );
+        assert_eq!(
+            client.get_proof_ttl_status(&unknown_id).health,
+            earnproof_shared::TtlHealth::Missing
+        );
+        client.register_proof(&proof_id, &bytes(&env, 0xe6), &issuer, &1, &2_000);
+        assert_eq!(
+            client.get_proof_ttl_status(&proof_id).health,
+            earnproof_shared::TtlHealth::Healthy
+        );
+    }
+
+    // ── structured proof validity reasons (issue 147) ──────────────────────────
+
+    use earnproof_shared::ProofValidity;
+
+    #[test]
+    fn proof_validity_reports_valid_for_active_unexpired_proof() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Valid);
+        // The legacy boolean helper agrees for the happy path.
+        assert!(client.is_valid_proof(&proof_id));
+    }
+
+    #[test]
+    fn proof_validity_reports_unknown_for_missing_proof() {
+        let (env, client, ..) = setup();
+        assert_eq!(
+            client.proof_validity(&bytes(&env, 99)),
+            ProofValidity::Unknown
+        );
+    }
+
+    #[test]
+    fn proof_validity_reports_revoked() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        client.revoke_proof(&proof_id);
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Revoked);
+    }
+
+    #[test]
+    fn proof_validity_reports_expired() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        env.ledger().with_mut(|li| li.timestamp = 3_000);
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Expired);
+        // Legacy helper also reports the proof as no longer valid.
+        assert!(!client.is_valid_proof(&proof_id));
+    }
+
+    #[test]
+    fn proof_validity_reports_issuer_inactive() {
+        let (env, client, _pc, issuer_registry, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        // Suspend the issuer registered by setup (issuer_id == bytes 9).
+        issuer_registry.suspend_issuer(&bytes(&env, 9));
+        assert_eq!(
+            client.proof_validity(&proof_id),
+            ProofValidity::IssuerInactive
+        );
+    }
+
+    #[test]
+    fn proof_validity_reports_schema_deprecated() {
+        let (env, client, protocol_config, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        protocol_config.deprecate_schema_version(&1);
+        assert_eq!(
+            client.proof_validity(&proof_id),
+            ProofValidity::SchemaDeprecated
+        );
+    }
+
+    /// When several invalid conditions hold at once, the canonical order makes
+    /// the earliest one the primary reason: revoked precedes expired.
+    #[test]
+    fn proof_validity_precedence_revoked_before_expired() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        client.revoke_proof(&proof_id);
+        env.ledger().with_mut(|li| li.timestamp = 3_000);
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Revoked);
+    }
+
+    /// Precedence: expired precedes issuer-inactive and schema-deprecated.
+    #[test]
+    fn proof_validity_precedence_expired_before_issuer_and_schema() {
+        let (env, client, protocol_config, issuer_registry, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        issuer_registry.suspend_issuer(&bytes(&env, 9));
+        protocol_config.deprecate_schema_version(&1);
+        env.ledger().with_mut(|li| li.timestamp = 3_000);
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Expired);
+    }
+
+    // ── proof creation ledger + timestamp metadata (issue 184) ─────────────────
+
+    #[test]
+    fn register_proof_records_creation_ledger_and_timestamp() {
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 4_321;
+            li.timestamp = 1_500;
+        });
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &5_000);
+        let record = client.get_proof(&proof_id);
+        assert_eq!(record.created_ledger, 4_321);
+        assert_eq!(record.created_at, 1_500);
+    }
+
+    #[test]
+    fn register_proof_emits_one_proof_registered_event() {
+        use soroban_sdk::testutils::Events;
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let proof_id = bytes(&env, 1);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 2), &issuer, &1, &2_000);
+        // register_proof publishes exactly one contract event carrying timing.
+        assert_eq!(env.events().all().events().len(), 1);
+    }
+
+    #[test]
+    fn failed_register_proof_emits_no_event() {
+        use soroban_sdk::testutils::Events;
+        let (env, client, _pc, _ir, _ir_id) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        // Expired at registration time: rejected, so no event and no record.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.register_proof(&bytes(&env, 1), &bytes(&env, 2), &issuer, &1, &0);
+        }));
+        assert!(result.is_err());
+        assert_eq!(env.events().all().events().len(), 0);
     }
 }

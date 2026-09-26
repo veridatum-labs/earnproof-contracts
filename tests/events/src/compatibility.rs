@@ -33,20 +33,64 @@ const DECLARED_EVENTS: &[(&str, &[&str])] = &[
             "issuer_id_hash",
             "issuer_address",
             "metadata_hash",
+            "metadata_uri_hash",
+            "metadata_revision",
             "provenance_commitment",
             "created_at",
         ],
     ),
     (
         "issuer_metadata_updated",
-        &["issuer_id_hash", "metadata_hash", "updated_at"],
+        &[
+            "issuer_id_hash",
+            "metadata_hash",
+            "metadata_uri_hash",
+            "metadata_revision",
+            "updated_at",
+        ],
     ),
-    ("issuer_suspended", &["issuer_id_hash", "updated_at"]),
-    ("issuer_reactivated", &["issuer_id_hash", "updated_at"]),
-    ("issuer_revoked", &["issuer_id_hash", "updated_at"]),
+    (
+        "issuer_suspended",
+        &[
+            "issuer_id_hash",
+            "effective_ledger",
+            "effective_timestamp",
+            "updated_at",
+        ],
+    ),
+    (
+        "issuer_reactivated",
+        &[
+            "issuer_id_hash",
+            "effective_ledger",
+            "effective_timestamp",
+            "updated_at",
+        ],
+    ),
+    (
+        "issuer_revoked",
+        &[
+            "issuer_id_hash",
+            "effective_ledger",
+            "effective_timestamp",
+            "updated_at",
+        ],
+    ),
     (
         "issuer_address_rotated",
         &["issuer_id_hash", "old_address", "new_address", "updated_at"],
+    ),
+    // proof-registry
+    (
+        "proof_registered",
+        &[
+            "proof_id_hash",
+            "issuer_address",
+            "schema_version",
+            "created_ledger",
+            "created_at",
+            "expires_at",
+        ],
     ),
 ];
 
@@ -218,18 +262,20 @@ fn every_declared_event_names_at_least_one_payload_field() {
 }
 
 #[test]
-fn proof_registry_declares_no_events() {
-    // The fixture at tests/fixtures/events/proof-registry/v1/events.json records
-    // an empty event list. Adding an event to this contract must therefore fail
-    // here first, forcing the fixture and docs/events.md to be updated with it.
-    let emitted_by_proof_registry = DECLARED_EVENTS
-        .iter()
-        .any(|(name, _)| name.starts_with("proof_"));
+fn proof_registry_events_match_their_fixtures() {
+    // proof-registry now emits `proof_registered` on registration, carrying the
+    // on-chain creation timing. The live emission must match the fields
+    // declared in DECLARED_EVENTS (mirrored in docs/events.md), exactly like
+    // the issuer-registry events above.
+    let deployment = Deployment::new();
 
-    assert!(
-        !emitted_by_proof_registry,
-        "proof-registry is documented as emitting no events; \
-         update tests/fixtures/events/proof-registry/v1/events.json and \
-         docs/events.md before declaring one here"
-    );
+    let events = deployment.capture(|| {
+        deployment.register_proof(0x21);
+    });
+
+    let registered = events
+        .iter()
+        .find(|event| event.is(&deployment.env, "proof_registered"))
+        .expect("register_proof must emit proof_registered");
+    assert_matches_fixture(&deployment.env, registered);
 }

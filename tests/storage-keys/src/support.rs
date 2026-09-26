@@ -276,12 +276,7 @@ pub fn exercised_deployment() -> Deployment {
         &1,
         &1_000_000,
     );
-    proofs.commit_disclosure_consent(
-        &proof_id,
-        &bytes32(&env, 30),
-        &1,
-        &bytes32(&env, 31),
-    );
+    proofs.commit_disclosure_consent(&proof_id, &bytes32(&env, 30), &1, &bytes32(&env, 31));
     proofs.register_proof(
         &bytes32(&env, 7),
         &bytes32(&env, 8),

@@ -1,7 +1,7 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
 use earnproof_shared::ProofError;
 use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};
+use libfuzzer_sys::fuzz_target;
 use proof_registry::{ProofRegistryContract, ProofRegistryContractClient};
 use protocol_config::{ProtocolConfigContract, ProtocolConfigContractClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
@@ -63,7 +63,10 @@ fuzz_target!(|data: &[u8]| {
         &receipt_version,
         &receipt_hash,
     );
-    assert!(first.is_ok(), "active proof accepts a well-sized receipt hash");
+    assert!(
+        first.is_ok(),
+        "active proof accepts a well-sized receipt hash"
+    );
 
     let duplicate = proofs.try_commit_disclosure_consent(
         &proof_id,

@@ -799,12 +799,8 @@ mod test {
         let receipt_hash = bytes(&env, 0x33);
         client.register_proof(&proof_id, &bytes(&env, 0x34), &issuer, &1, &2_000);
 
-        let commitment = client.commit_disclosure_consent(
-            &proof_id,
-            &policy_hash,
-            &1,
-            &receipt_hash,
-        );
+        let commitment =
+            client.commit_disclosure_consent(&proof_id, &policy_hash, &1, &receipt_hash);
 
         assert!(client.has_consent_receipt_commitment(&commitment));
         env.as_contract(&client.address, || {
@@ -818,11 +814,12 @@ mod test {
                     .get::<_, bool>(&DataKey::ConsentReceipt(commitment.clone())),
                 Some(true)
             );
-            assert!(env
-                .storage()
-                .persistent()
-                .get_ttl(&DataKey::ConsentReceipt(commitment.clone()))
-                > TTL_THRESHOLD_LEDGERS);
+            assert!(
+                env.storage()
+                    .persistent()
+                    .get_ttl(&DataKey::ConsentReceipt(commitment.clone()))
+                    > TTL_THRESHOLD_LEDGERS
+            );
         });
     }
 
@@ -836,13 +833,10 @@ mod test {
         client.register_proof(&proof_id, &bytes(&env, 0x44), &issuer, &1, &2_000);
 
         let first = client.commit_disclosure_consent(&proof_id, &policy_hash, &7, &receipt_hash);
-        let duplicate = client.try_commit_disclosure_consent(
-            &proof_id,
-            &policy_hash,
-            &7,
-            &receipt_hash,
-        );
-        let next_version = client.commit_disclosure_consent(&proof_id, &policy_hash, &8, &receipt_hash);
+        let duplicate =
+            client.try_commit_disclosure_consent(&proof_id, &policy_hash, &7, &receipt_hash);
+        let next_version =
+            client.commit_disclosure_consent(&proof_id, &policy_hash, &8, &receipt_hash);
 
         assert_eq!(
             duplicate,
@@ -885,12 +879,8 @@ mod test {
         let first = client.commit_disclosure_consent(&first_proof, &policy_hash, &1, &receipt_hash);
         let other_proof =
             client.commit_disclosure_consent(&second_proof, &policy_hash, &1, &receipt_hash);
-        let other_policy = client.commit_disclosure_consent(
-            &first_proof,
-            &bytes(&env, 0x67),
-            &1,
-            &receipt_hash,
-        );
+        let other_policy =
+            client.commit_disclosure_consent(&first_proof, &bytes(&env, 0x67), &1, &receipt_hash);
 
         assert_ne!(first, other_proof);
         assert_ne!(first, other_policy);
@@ -902,23 +892,15 @@ mod test {
         let proof_id = bytes(&env, 0x71);
         let policy_hash = bytes(&env, 0x72);
         let receipt_hash = bytes(&env, 0x73);
-        let missing = client.try_commit_disclosure_consent(
-            &proof_id,
-            &policy_hash,
-            &1,
-            &receipt_hash,
-        );
+        let missing =
+            client.try_commit_disclosure_consent(&proof_id, &policy_hash, &1, &receipt_hash);
         assert_eq!(missing, Err(Ok(ProofError::ProofNotFound)));
 
         let issuer = Address::from_str(&env, ISSUER);
         client.register_proof(&proof_id, &bytes(&env, 0x74), &issuer, &1, &100);
         env.ledger().set_timestamp(101);
-        let expired = client.try_commit_disclosure_consent(
-            &proof_id,
-            &policy_hash,
-            &1,
-            &receipt_hash,
-        );
+        let expired =
+            client.try_commit_disclosure_consent(&proof_id, &policy_hash, &1, &receipt_hash);
         assert_eq!(expired, Err(Ok(ProofError::ProofExpired)));
 
         let would_be_commitment = disclosure_consent_commitment(

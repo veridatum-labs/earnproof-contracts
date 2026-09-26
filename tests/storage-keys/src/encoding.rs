@@ -13,8 +13,8 @@
 use super::support::{
     address_issuer_key, address_ttl_key, admin_key, bytes32, config_version_key,
     consent_receipt_key, contract_version_key, deployment, encoded, encoded_keys_in,
-    exercised_deployment, instance_live_until_key, issuer_key, issuer_registry_key,
-    issuer_ttl_key, paused_key, proof_key, protocol_config_key, schema_version_key,
+    exercised_deployment, instance_live_until_key, issuer_key, issuer_registry_key, issuer_ttl_key,
+    paused_key, proof_key, protocol_config_key, schema_version_key,
 };
 use earnproof_shared::{disclosure_consent_commitment, StorageClass};
 use soroban_sdk::testutils::Address as _;
@@ -325,6 +325,8 @@ fn consent_receipt_key_reconstructs_the_hash_only_index() {
         &receipt_hash,
     );
 
-    assert!(encoded_keys_in(env, &deployment.proofs_id, StorageClass::Persistent)
-        .contains(&encoded(env, consent_receipt_key(env, &commitment_hash))));
+    assert!(
+        encoded_keys_in(env, &deployment.proofs_id, StorageClass::Persistent)
+            .contains(&encoded(env, consent_receipt_key(env, &commitment_hash)))
+    );
 }

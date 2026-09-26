@@ -120,7 +120,13 @@ fn matrix() -> std::vec::Vec<Case> {
             setup: no_setup,
             call: |d| {
                 let next = Address::generate(&d.env);
-                settled(d.config.try_set_admin(&next))
+                {
+                    let res = d.config.try_nominate_admin(&next);
+                    if res.is_ok() {
+                        let _ = d.config.try_accept_admin();
+                    }
+                    settled(res)
+                }
             },
         },
         Case {

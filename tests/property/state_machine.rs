@@ -229,7 +229,7 @@ proptest! {
                     } else {
                         admin.clone()
                     };
-                    let result = try_op(&env, || { client.set_admin(&new_admin); });
+                    let result = try_op(&env, || { { client.nominate_admin(&new_admin); client.accept_admin(); } });
                     prop_assert!(result);
                     current_admin = new_admin;
                 }

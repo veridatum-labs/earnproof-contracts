@@ -114,20 +114,43 @@ fn matrix() -> std::vec::Vec<Case> {
                 let next = Address::generate(&d.env);
                 let args: soroban_sdk::Vec<Val> = (&next,).into_val(&d.env);
                 match identity {
-                    Identity::Missing => d.config.try_set_admin(&next).is_ok(),
+                    Identity::Missing => {
+                        let r = d.config.try_nominate_admin(&next);
+                        if r.is_ok() {
+                            let _ = d.config.try_accept_admin();
+                        }
+                        r
+                    }
+                    .is_ok(),
                     Identity::Wrong => {
                         authorize(
                             &d.env,
                             &d.attacker(),
                             &d.config_address,
-                            "set_admin",
+                            "nominate_admin",
                             args.clone(),
                         );
-                        d.config.try_set_admin(&next).is_ok()
+                        {
+                            let r = d.config.try_nominate_admin(&next);
+                            if r.is_ok() {
+                                authorize(&d.env, &next, &d.config_address, "accept_admin", ().into_val(&d.env));
+                                let _ = d.config.try_accept_admin();
+                            }
+                            r
+                        }
+                        .is_ok()
                     }
                     Identity::Authorized => {
-                        authorize(&d.env, &d.admin, &d.config_address, "set_admin", args);
-                        d.config.try_set_admin(&next).is_ok()
+                        authorize(&d.env, &d.admin, &d.config_address, "nominate_admin", args);
+                        {
+                            let r = d.config.try_nominate_admin(&next);
+                            if r.is_ok() {
+                                authorize(&d.env, &next, &d.config_address, "accept_admin", ().into_val(&d.env));
+                                let _ = d.config.try_accept_admin();
+                            }
+                            r
+                        }
+                        .is_ok()
                     }
                 }
             },

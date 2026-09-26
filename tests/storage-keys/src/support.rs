@@ -238,7 +238,8 @@ pub fn exercised_deployment() -> Deployment {
     config.deprecate_schema_version(&2);
     config.pause();
     config.unpause();
-    config.set_admin(&rotated_admin);
+    config.nominate_admin(&rotated_admin);
+    config.accept_admin();
 
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);

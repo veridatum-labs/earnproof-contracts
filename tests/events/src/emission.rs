@@ -94,12 +94,12 @@ fn unpause_emits_unpaused_once_and_matches_state() {
 fn set_admin_emits_admin_changed_once_and_matches_state() {
     let deployment = Deployment::new();
     let successor = Address::generate(&deployment.env);
-    let events = deployment.capture(|| deployment.config.set_admin(&successor));
-    let event = expect_single(&deployment.env, &events, "admin_changed");
+    let events = deployment.capture(|| { deployment.config.nominate_admin(&successor); deployment.config.accept_admin() });
+    let event = expect_single(&deployment.env, &events, "admin_transfer_accepted");
 
     let announced: Address = event
         .field(&deployment.env, "new_admin")
-        .expect("admin_changed event must carry a new_admin field");
+        .expect("admin_transfer_accepted event must carry a new_admin field");
 
     assert_eq!(announced, successor);
     assert_eq!(announced, deployment.config.get_admin());

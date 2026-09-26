@@ -140,7 +140,13 @@ fn apply_to_contracts(deployment: &Deployment, op: Op, step: usize) -> bool {
         Unpause => deployment.config.try_unpause().is_ok(),
         RotateAdmin => {
             let next = Address::generate(&deployment.env);
-            deployment.config.try_set_admin(&next).is_ok()
+            {
+                let r = deployment.config.try_nominate_admin(&next);
+                if r.is_ok() {
+                    let _ = deployment.config.try_accept_admin();
+                }
+                r.is_ok()
+            }
         }
         SuspendIssuer => deployment.issuers.try_suspend_issuer(&issuer_id).is_ok(),
         ReactivateIssuer => deployment.issuers.try_reactivate_issuer(&issuer_id).is_ok(),
@@ -276,7 +282,8 @@ fn a_paused_protocol_cannot_be_left_without_an_administrator() {
     let mut current = deployment.admin.clone();
     for _ in 0..5 {
         let next = Address::generate(&deployment.env);
-        deployment.config.set_admin(&next);
+        deployment.config.nominate_admin(&next);
+        deployment.config.accept_admin();
 
         let observed = deployment.config.get_admin();
         assert_eq!(observed, next, "rotation must name the intended successor");

@@ -79,7 +79,10 @@ fn each_mutation_publishes_exactly_one_event() {
         ),
         (
             "set_admin",
-            std::boxed::Box::new(|| deployment.config.set_admin(&successor))
+            std::boxed::Box::new(|| {
+                deployment.config.nominate_admin(&successor);
+                deployment.config.accept_admin()
+            })
         ),
     ];
 
@@ -281,7 +284,10 @@ fn no_event_payload_carries_protected_data() {
         ),
         (
             "set_admin",
-            std::boxed::Box::new(|| deployment.config.set_admin(&successor))
+            std::boxed::Box::new(|| {
+                deployment.config.nominate_admin(&successor);
+                deployment.config.accept_admin()
+            })
         ),
     ];
 

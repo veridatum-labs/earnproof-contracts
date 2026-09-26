@@ -217,10 +217,18 @@ impl Deployment<'_> {
             &self.env,
             &self.admin,
             &self.config_address,
-            "set_admin",
+            "nominate_admin",
             (new_admin,).into_val(&self.env),
         );
-        self.config.set_admin(new_admin);
+        self.config.nominate_admin(new_admin);
+        authorize(
+            &self.env,
+            new_admin,
+            &self.config_address,
+            "accept_admin",
+            ().into_val(&self.env),
+        );
+        self.config.accept_admin();
     }
 
     pub fn suspend_issuer(&self, issuer_id: &BytesN<32>) {

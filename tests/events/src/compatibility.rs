@@ -21,7 +21,9 @@ use soroban_sdk::{Address, Env, Symbol, TryFromVal, Val};
 const DECLARED_EVENTS: &[(&str, &[&str])] = &[
     // protocol-config
     ("initialized", &["admin"]),
-    ("admin_changed", &["new_admin"]),
+    ("admin_transfer_nominated", &["pending_admin", "nominated_by"]),
+    ("admin_transfer_accepted", &["new_admin"]),
+    ("admin_transfer_cancelled", &["pending_admin", "cancelled_by"]),
     ("paused", &["paused"]),
     ("unpaused", &["paused"]),
     ("schema_approved", &["version"]),
@@ -120,7 +122,7 @@ fn protocol_config_events_match_their_fixtures() {
     for event in deployment.capture(|| deployment.config.deprecate_schema_version(&4)) {
         assert_matches_fixture(&deployment.env, &event);
     }
-    for event in deployment.capture(|| deployment.config.set_admin(&successor)) {
+    for event in deployment.capture(|| { deployment.config.nominate_admin(&successor); deployment.config.accept_admin() }) {
         assert_matches_fixture(&deployment.env, &event);
     }
 }

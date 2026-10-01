@@ -124,6 +124,103 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
     let initial_dep = deployment();
     let env = &initial_dep.env;
 
+    let zero_address = Address::from_str(
+        env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    );
+    observed.record(
+        "issuer-registry rejects sentinel governance address",
+        code(initial_dep.issuers.try_grant_governance_role(
+            &bytes32(env, 0xA1),
+            &earnproof_shared::GovernanceRole::IssuerManagement,
+            &zero_address,
+            &env.ledger().sequence(),
+            &None,
+        )),
+    );
+    let now_ledger = env.ledger().sequence();
+    observed.record(
+        "issuer-registry rejects invalid governance timing",
+        code(initial_dep.issuers.try_grant_governance_role(
+            &bytes32(env, 0xA2),
+            &earnproof_shared::GovernanceRole::IssuerManagement,
+            &Address::generate(env),
+            &(now_ledger + 2),
+            &Some(now_ledger + 1),
+        )),
+    );
+    observed.record(
+        "issuer-registry rejects empty provenance commitment",
+        code(initial_dep.issuers.try_register_issuer(
+            &bytes32(env, 0xA3),
+            &Address::generate(env),
+            &bytes32(env, 0xA4),
+            &soroban_sdk::BytesN::from_array(env, &[0; 32]),
+        )),
+    );
+
+    // Exercise every timed-upgrade rejection while isolating its approval
+    // record and ledger window from the other attempts.
+    let no_approval = deployment();
+    observed.record(
+        "issuer-registry upgrade without approval",
+        code(no_approval
+            .issuers
+            .try_upgrade_contract(&bytes32(&no_approval.env, 0xB1), &2)),
+    );
+
+    let early_upgrade = deployment();
+    let early_hash = bytes32(&early_upgrade.env, 0xB2);
+    early_upgrade
+        .issuers
+        .approve_upgrade(&bytes32(&early_upgrade.env, 0xB3), &early_hash, &2);
+    observed.record(
+        "issuer-registry upgrade before timelock",
+        code(early_upgrade
+            .issuers
+            .try_upgrade_contract(&early_hash, &2)),
+    );
+
+    let expired_upgrade = deployment();
+    let expired_hash = bytes32(&expired_upgrade.env, 0xB4);
+    expired_upgrade.issuers.approve_upgrade(
+        &bytes32(&expired_upgrade.env, 0xB5),
+        &expired_hash,
+        &2,
+    );
+    let expiry_ledger = expired_upgrade.env.ledger().sequence()
+        + earnproof_shared::UPGRADE_APPROVAL_EXPIRY_LEDGERS;
+    expired_upgrade
+        .env
+        .ledger()
+        .set_sequence_number(expiry_ledger);
+    observed.record(
+        "issuer-registry expired upgrade approval",
+        code(expired_upgrade
+            .issuers
+            .try_upgrade_contract(&expired_hash, &2)),
+    );
+
+    let mismatched_upgrade = deployment();
+    let approved_hash = bytes32(&mismatched_upgrade.env, 0xB6);
+    mismatched_upgrade.issuers.approve_upgrade(
+        &bytes32(&mismatched_upgrade.env, 0xB7),
+        &approved_hash,
+        &2,
+    );
+    let executable_ledger = mismatched_upgrade.env.ledger().sequence()
+        + earnproof_shared::UPGRADE_TIMELOCK_LEDGERS;
+    mismatched_upgrade
+        .env
+        .ledger()
+        .set_sequence_number(executable_ledger);
+    observed.record(
+        "issuer-registry upgrade hash mismatch",
+        code(mismatched_upgrade
+            .issuers
+            .try_upgrade_contract(&bytes32(&mismatched_upgrade.env, 0xB8), &2)),
+    );
+
     let fresh_config = env.register(ProtocolConfigContract, ());
     let fresh_config = ProtocolConfigContractClient::new(env, &fresh_config);
     observed.record(
@@ -276,6 +373,17 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
         &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]),
     );
     observed.record(
+        "proof-registry rejects a protocol-config address as issuer",
+        code(initial_dep.proofs.try_register_proof_with_type_identifier(
+            &bytes32(env, 0xA5),
+            &bytes32(env, 0xA6),
+            &initial_dep.config_id,
+            &1,
+            &FAR_FUTURE,
+            &soroban_sdk::BytesN::from_array(env, &[1u8; 32]),
+        )),
+    );
+    observed.record(
         "proof-registry duplicate proof id",
         code(initial_dep.proofs.try_register_proof_with_type_identifier(
             &proof_id,
@@ -397,11 +505,107 @@ fn every_returned_code_is_produced_by_a_real_failure_path() {
             &soroban_sdk::BytesN::from_array(&env4, &[1u8; 32]),
         )),
     );
+
+    // Supersession errors use the appended proof-registry code range.
+    let deployment_cyclic = deployment();
+    let env_cyclic = &deployment_cyclic.env;
+    observed.record(
+        "proof-registry cyclic supersession",
+        code(deployment_cyclic.proofs.try_register_proof_with_predecessor(
+            &bytes32(env_cyclic, 70),
+            &bytes32(env_cyclic, 71),
+            &deployment_cyclic.issuer,
+            &1,
+            &FAR_FUTURE,
+            &Some(bytes32(env_cyclic, 70)),
+            &soroban_sdk::BytesN::from_array(env_cyclic, &[1; 32]),
+        )),
+    );
+
+    let deployment_cross = deployment();
+    let env_cross = &deployment_cross.env;
+    let issuer_cross = Address::generate(env_cross);
+    deployment_cross.issuers.register_issuer(
+        &bytes32(env_cross, 80),
+        &issuer_cross,
+        &bytes32(env_cross, 81),
+        &bytes32(env_cross, 82),
+    );
+    deployment_cross.proofs.register_proof_with_type_identifier(
+        &bytes32(env_cross, 83),
+        &bytes32(env_cross, 84),
+        &deployment_cross.issuer,
+        &1,
+        &FAR_FUTURE,
+        &soroban_sdk::BytesN::from_array(env_cross, &[1; 32]),
+    );
+    observed.record(
+        "proof-registry cross issuer supersession",
+        code(deployment_cross.proofs.try_register_proof_with_predecessor(
+            &bytes32(env_cross, 85),
+            &bytes32(env_cross, 86),
+            &issuer_cross,
+            &1,
+            &FAR_FUTURE,
+            &Some(bytes32(env_cross, 83)),
+            &soroban_sdk::BytesN::from_array(env_cross, &[1; 32]),
+        )),
+    );
+
+    let deployment_missing = deployment();
+    let env_missing = &deployment_missing.env;
+    observed.record(
+        "proof-registry predecessor not found",
+        code(deployment_missing.proofs.try_register_proof_with_predecessor(
+            &bytes32(env_missing, 90),
+            &bytes32(env_missing, 91),
+            &deployment_missing.issuer,
+            &1,
+            &FAR_FUTURE,
+            &Some(bytes32(env_missing, 92)),
+            &soroban_sdk::BytesN::from_array(env_missing, &[1; 32]),
+        )),
+    );
+
+    let deployment_many = deployment();
+    let env_many = &deployment_many.env;
+    deployment_many.proofs.register_proof_with_type_identifier(
+        &bytes32(env_many, 100),
+        &bytes32(env_many, 101),
+        &deployment_many.issuer,
+        &1,
+        &FAR_FUTURE,
+        &soroban_sdk::BytesN::from_array(env_many, &[1; 32]),
+    );
+    for i in 1..=earnproof_shared::MAX_SUCCESSORS {
+        deployment_many.proofs.register_proof_with_predecessor(
+            &bytes32(env_many, (100 + i) as u8),
+            &bytes32(env_many, (200 + i) as u8),
+            &deployment_many.issuer,
+            &1,
+            &FAR_FUTURE,
+            &Some(bytes32(env_many, 100)),
+            &soroban_sdk::BytesN::from_array(env_many, &[1; 32]),
+        );
+    }
+    observed.record(
+        "proof-registry too many successors",
+        code(deployment_many.proofs.try_register_proof_with_predecessor(
+            &bytes32(env_many, 110),
+            &bytes32(env_many, 111),
+            &deployment_many.issuer,
+            &1,
+            &FAR_FUTURE,
+            &Some(bytes32(env_many, 100)),
+            &soroban_sdk::BytesN::from_array(env_many, &[1; 32]),
+        )),
+    );
+
     let deployment5 = deployment();
     let env5 = &deployment5.env;
     observed.record(
         "proof-registry unsupported proof type",
-        code(deployment5.proofs.try_register_proof(
+        code(deployment5.proofs.try_register_proof_with_type_identifier(
             &bytes32(env5, 70),
             &bytes32(env5, 71),
             &deployment5.issuer,

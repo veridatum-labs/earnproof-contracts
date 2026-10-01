@@ -505,7 +505,7 @@ fn a_failed_registration_rolls_back_writes_inside_the_dependency() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn an_invalid_protocol_config_address_aborts_the_registration() {
+fn an_invalid_protocol_config_address_is_rejected_during_initialization() {
     // Point proof-registry at an address with no contract deployed
     let env = soroban_sdk::Env::default();
     env.mock_all_auths();
@@ -545,7 +545,7 @@ fn an_invalid_protocol_config_address_aborts_the_registration() {
 }
 
 #[test]
-fn an_invalid_issuer_registry_address_aborts_the_registration() {
+fn an_invalid_issuer_registry_address_is_rejected_during_initialization() {
     let env = soroban_sdk::Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);

@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contracterror, contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Symbol,
+    contracterror, contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
 
 pub mod storage_namespaces;
@@ -390,6 +390,33 @@ impl GovernanceRoleAssignment {
     }
 }
 
+/// Derives a network- and contract-scoped key for one-time governance
+/// proposal execution tracking.
+pub fn proposal_domain_key(
+    env: &Env,
+    contract_name: Symbol,
+    proposal_id: &BytesN<32>,
+) -> BytesN<32> {
+    let network_id = env.ledger().network_id();
+    let payload = (
+        Symbol::new(env, "earnproof_proposal_v1"),
+        network_id,
+        contract_name,
+        proposal_id.clone(),
+    )
+        .to_xdr(env);
+    env.crypto().sha256(&payload).to_bytes()
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationRecord {
+    pub old_address: Address,
+    pub new_address: Address,
+    pub rotated_at: u64,
+    pub ledger_sequence: u32,
+}
+
 /// Returns true when `actual` is compatible with the `required` minimum.
 ///
 /// The `major` component must match exactly (a breaking-change boundary); the
@@ -483,17 +510,18 @@ pub enum IssuerError {
     IssuerInactive = 205,
     InvalidTransition = 206,
     InvalidAddress = 207,
-    InvalidMetadataCommitment = 211,
     /// Registering or reactivating this issuer would exceed the governed
     /// maximum active-issuer capacity.
     IssuerCapacityExceeded = 208,
+    /// The metadata commitment did not match the required fixed-size format.
+    InvalidMetadataCommitment = 211,
+    /// A batch query supplied more identifiers than [`MAX_ISSUER_STATUS_BATCH`].
+    BatchTooLarge = 212,
     /// A requested capacity limit is below the current active-issuer usage and
     /// no explicit override was supplied.
     MaxBelowActiveUsage = 209,
     /// The suspended issuer's reactivation cooldown has not yet elapsed.
     ReactivationCooldownActive = 210,
-    /// A bounded batch issuer-status query exceeded its documented maximum.
-    BatchTooLarge = 212,
 }
 
 /// Proof-specific errors (300-399).
@@ -526,11 +554,11 @@ pub enum ProofError {
     /// Recovery: validate input against the schema before resubmitting.
     MalformedInput = 310,
     /// The proof registry has reached its configured capacity.
-    ProofCapacityReached = 311,
+    ProofCapacityReached = 318,
     /// Proof-count accounting must be reconciled before registration can proceed.
-    ProofAccountingUnavailable = 312,
+    ProofAccountingUnavailable = 319,
     /// A proof-count counter cannot be incremented without overflowing.
-    ProofCountOverflow = 313,
+    ProofCountOverflow = 320,
     /// A batch operation was given zero entries or more than
     /// `MAX_PROOF_BATCH_SIZE` entries.
     /// Recovery: split the batch into chunks of at most `MAX_PROOF_BATCH_SIZE`.
@@ -558,6 +586,14 @@ pub enum ProofError {
     /// The network passphrase or asset identifier is not canonical, or the
     /// passphrase does not match the current ledger network.
     InvalidProofContext = 317,
+    /// A proof cannot supersede itself or create a supersession cycle.
+    CyclicSupersession = 321,
+    /// Supersession is restricted to proofs from the same issuer.
+    CrossIssuerSupersession = 322,
+    /// The specified predecessor proof was not found.
+    PredecessorNotFound = 323,
+    /// The predecessor already has the maximum number of successors.
+    TooManySuccessors = 324,
 }
 
 /// Versioned asset identifier accepted by context-aware proof registration.
@@ -753,6 +789,70 @@ pub enum ConfigChangeCategory {
     SchemaPayloadLimit,
     SchemaPolicy,
     CommitmentAlgorithmPolicy,
+    ApprovalPolicyUpdate,
+}
+
+/// Category of a protocol mutation that may require threshold approval.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CriticalActionCategory {
+    SchemaApproval,
+    SchemaDeprecation,
+    SchemaPayloadLimit,
+    IssuerRegistryReplacement,
+    ProtocolConfigReplacement,
+    ApprovalPolicyUpdate,
+}
+
+/// Canonical parameters for a threshold-governed protocol action.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CriticalAction {
+    SchemaApproval(u32),
+    SchemaDeprecation(u32),
+    SchemaPayloadLimit(u32, u32),
+    IssuerRegistryReplacement(Address),
+    ProtocolConfigReplacement(Address),
+    ApprovalPolicyUpdate(CriticalActionPolicy),
+}
+
+impl CriticalAction {
+    pub fn category(&self) -> CriticalActionCategory {
+        match self {
+            Self::SchemaApproval(_) => CriticalActionCategory::SchemaApproval,
+            Self::SchemaDeprecation(_) => CriticalActionCategory::SchemaDeprecation,
+            Self::SchemaPayloadLimit(_, _) => CriticalActionCategory::SchemaPayloadLimit,
+            Self::IssuerRegistryReplacement(_) => {
+                CriticalActionCategory::IssuerRegistryReplacement
+            }
+            Self::ProtocolConfigReplacement(_) => {
+                CriticalActionCategory::ProtocolConfigReplacement
+            }
+            Self::ApprovalPolicyUpdate(_) => CriticalActionCategory::ApprovalPolicyUpdate,
+        }
+    }
+}
+
+/// Optional multi-party approval policy for critical protocol actions.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CriticalActionPolicy {
+    pub enabled: bool,
+    pub threshold: u32,
+    pub signers: Vec<Address>,
+}
+
+/// Persisted proposal and approval window for a critical protocol action.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CriticalActionProposal {
+    pub action: CriticalAction,
+    pub category: CriticalActionCategory,
+    pub policy: CriticalActionPolicy,
+    pub proposer: Address,
+    pub approvals: Vec<Address>,
+    pub created_at: u32,
+    pub expires_at: u32,
 }
 
 /// One bounded, on-chain summary of a governance change, as stored in the
@@ -846,6 +946,36 @@ pub struct UpgradeApproval {
     pub approved_by: Address,
 }
 
+/// Upper bound on the number of identifiers a single bounded batch issuer
+/// status query may carry. The limit is enforced before any storage access so
+/// an oversized request cannot force unbounded host work.
+pub const MAX_ISSUER_STATUS_BATCH: u32 = 50;
+
+/// Status of a single issuer as reported by a bounded batch status query.
+///
+/// Unlike [`IssuerStatus`], this carries an explicit `NotFound` so an unknown
+/// identifier is unambiguous rather than being conflated with any live state.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IssuerQueryStatus {
+    Active,
+    Suspended,
+    Revoked,
+    NotFound,
+}
+
+/// One entry in a bounded batch issuer status response.
+///
+/// The identifier is echoed back next to its status so callers can correlate
+/// results by value; combined with preserved input ordering this makes
+/// duplicate identifiers in the request unambiguous in the response.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IssuerStatusResult {
+    pub issuer_id_hash: BytesN<32>,
+    pub status: IssuerQueryStatus,
+}
+
 /// Privacy-safe issuer signing-key commitment. Only a key digest and algorithm
 /// identifier are persisted; raw public or private keys are never accepted.
 #[contracttype]
@@ -863,27 +993,6 @@ pub struct IssuerPolicyCommitments {
     pub encoding_version: u32,
     pub category_commitment: BytesN<32>,
     pub jurisdiction_commitment: BytesN<32>,
-}
-
-/// Maximum identifiers accepted by one bounded issuer status query.
-pub const MAX_ISSUER_STATUS_BATCH: u32 = 50;
-
-/// Status returned for one identifier in a bounded issuer status query.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum IssuerQueryStatus {
-    Active,
-    Suspended,
-    Revoked,
-    NotFound,
-}
-
-/// One issuer id and its current status in a bounded query response.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IssuerStatusResult {
-    pub issuer_id_hash: BytesN<32>,
-    pub status: IssuerQueryStatus,
 }
 
 /// Maximum schema versions accepted by one bounded status query.
@@ -965,11 +1074,12 @@ pub struct ProofRecord {
     pub expires_at: u64,
     pub created_at: u64,
     pub revoked_at: u64,
+    /// Ledger sequence at which the proof was revoked; zero while active.
+    pub revoked_ledger: u32,
+    pub predecessor_id_hash: Option<BytesN<32>>,
     /// Stable protocol proof type. `None` is the explicit legacy marker for
     /// records written before proof types were committed to storage.
     pub proof_type: Option<BytesN<32>>,
-    /// Ledger sequence at revocation; zero marks legacy records without it.
-    pub revoked_ledger: u32,
     /// Monotonically increasing sequence number for proofs issued by this
     /// issuer. The first proof for an issuer is `1`.
     pub sequence_number: u64,
@@ -1152,6 +1262,8 @@ pub struct UpgradeCompatibilityAttestation {
 pub struct AttestedUpgradeReceipt {
     pub receipt: UpgradeReceipt,
     pub attestation: UpgradeCompatibilityAttestation,
+}
+
 /// Bounded, on-chain record of a proof that has been archived after
 /// expiring or being revoked. Kept separate from `ProofRecord` storage so
 /// live-proof lookups never have to filter out archived entries.
@@ -1269,6 +1381,8 @@ pub enum ApprovalQuery {
 // These utilities provide common patterns for initialization adversarial testing
 // across all contracts, ensuring consistent test coverage for re-initialization
 // guards, invalid dependencies, and state/event immutability on failure.
+
+pub const MAX_SUCCESSORS: u32 = 5;
 
 #[cfg(test)]
 mod interface_version_tests {

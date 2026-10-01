@@ -592,12 +592,11 @@ fn matrix() -> std::vec::Vec<Case> {
                             &d.env,
                             &d.second_issuer,
                             &d.proofs_address,
-                            "register_proof",
+                            "register_proof_with_type_identifier",
                             args.clone(),
                         );
                         d.proofs
                             .try_register_proof_with_type_identifier(
-                            .try_register_proof(
                                 &proof_id,
                                 &commitment,
                                 &d.issuer,
@@ -608,10 +607,15 @@ fn matrix() -> std::vec::Vec<Case> {
                             .is_ok()
                     }
                     Identity::Authorized => {
-                        authorize(&d.env, &d.issuer, &d.proofs_address, "register_proof", args);
+                        authorize(
+                            &d.env,
+                            &d.issuer,
+                            &d.proofs_address,
+                            "register_proof_with_type_identifier",
+                            args,
+                        );
                         d.proofs
                             .try_register_proof_with_type_identifier(
-                            .try_register_proof(
                                 &proof_id,
                                 &commitment,
                                 &d.issuer,

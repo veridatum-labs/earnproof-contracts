@@ -133,8 +133,16 @@ pub fn address_ttl_key(env: &Env, address: &Address) -> (Symbol, Address) {
     (Symbol::new(env, "AddressTtl"), address.clone())
 }
 
+pub fn active_issuer_count_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "ActiveIssuerCount"),)
+}
+
 pub fn proof_key(id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (symbol_short!("Proof"), id.clone())
+}
+
+pub fn proof_policy_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofPolicy"), id.clone())
 }
 
 pub fn proof_context_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
@@ -153,6 +161,14 @@ pub fn registry_epoch_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "RegistryEpoch"),)
 }
 
+pub fn successors_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "Successors"), id.clone())
+}
+
+pub fn reactivatable_at_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ReactivatableAt"), id.clone())
+}
+
 pub fn issuer_epoch_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "IssuerEpoch"),)
 }
@@ -161,23 +177,11 @@ pub fn max_active_issuers_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "MaxActiveIssuers"),)
 }
 
-pub fn active_issuer_count_key(env: &Env) -> (Symbol,) {
-    (Symbol::new(env, "ActiveIssuerCount"),)
-}
-
 pub fn reactivation_cooldown_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "ReactivationCooldown"),)
 }
 pub fn proof_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (Symbol::new(env, "ProofTtl"), id.clone())
-}
-
-pub fn genesis_key() -> (Symbol,) {
-    (symbol_short!("Genesis"),)
-}
-
-pub fn registry_epoch_key(env: &Env) -> (Symbol,) {
-    (Symbol::new(env, "RegistryEpoch"),)
 }
 
 #[allow(dead_code)]
@@ -330,7 +334,7 @@ pub fn exercised_deployment() -> Deployment {
     let rotated_issuer = Address::generate(&env);
     let suspended_issuer = Address::generate(&env);
     let revoked_issuer = Address::generate(&env);
-    let _held_suspended_issuer = Address::generate(&env);
+    let held_suspended_issuer = Address::generate(&env);
     let issuer_id = bytes32(&env, 1);
     let proof_id = bytes32(&env, 5);
 
@@ -389,6 +393,16 @@ pub fn exercised_deployment() -> Deployment {
         &bytes32(&env, 20),
         &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]),
     );
+    issuers.register_issuer(
+        &bytes32(&env, 30),
+        &held_suspended_issuer,
+        &bytes32(&env, 31),
+        &bytes32(&env, 99),
+    );
+    issuers.suspend_issuer(
+        &bytes32(&env, 30),
+        &soroban_sdk::BytesN::from_array(&env, &[2u8; 32]),
+    );
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
@@ -399,6 +413,15 @@ pub fn exercised_deployment() -> Deployment {
         &rotated_issuer,
         &1,
         &1_000_000,
+        &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
+    );
+    proofs.register_proof_with_predecessor(
+        &bytes32(&env, 11),
+        &bytes32(&env, 12),
+        &rotated_issuer,
+        &1,
+        &1_000_000,
+        &Some(proof_id.clone()),
         &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
     );
     proofs.register_proof_with_type_identifier(

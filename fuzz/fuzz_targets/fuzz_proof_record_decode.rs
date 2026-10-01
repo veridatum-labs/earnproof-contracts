@@ -92,33 +92,35 @@ fuzz_target!(|data: &[u8]| {
         0
     };
 
-    let created_ledger = u32::from_be_bytes([data[125], data[126], data[127], data[128]]);
-
-    // An absent trailing proof-type segment models a legacy record; present
-    // bytes exercise the stable identifier carried by current records.
-    let proof_type = if data.len() >= 129 {
-        match BytesN::<32>::try_from(Bytes::from_slice(&env, &data[97..129])) {
-            Ok(value) => Some(value),
-            Err(_) => return,
-        }
+    // Compact fuzz layout after the fixed fields: revocation sequence,
+    // optional predecessor slot, optional proof-type slot, issuer sequence,
+    // creation ledger, then activation timestamp.
+    let revoked_ledger = u32::from_be_bytes([data[125], data[126], data[127], data[128]]);
+    let predecessor_id_hash = if data.len() >= 162 && data[129] % 2 == 1 {
+        BytesN::<32>::try_from(Bytes::from_slice(&env, &data[130..162])).ok()
     } else {
         None
     };
-
-    // Parse activates_at (u64, bytes 97-105, big-endian)
-    let activates_at = if data.len() > 104 {
-    let sequence_number = if data.len() > 105 {
+    let proof_type = if data.len() >= 195 && data[162] % 2 == 1 {
+        BytesN::<32>::try_from(Bytes::from_slice(&env, &data[163..195])).ok()
+    } else {
+        None
+    };
+    let sequence_number = if data.len() >= 203 {
         u64::from_be_bytes([
-            data[97], data[98], data[99], data[100], data[101], data[102], data[103], data[104],
+            data[195], data[196], data[197], data[198], data[199], data[200], data[201], data[202],
         ])
     } else {
         1
     };
-
-    // Parse activates_at (u64, bytes 97-105, big-endian)
-    let activates_at = if data.len() > 113 {
+    let created_ledger = if data.len() >= 207 {
+        u32::from_be_bytes([data[203], data[204], data[205], data[206]])
+    } else {
+        1
+    };
+    let activates_at = if data.len() >= 215 {
         u64::from_be_bytes([
-            data[105], data[106], data[107], data[108], data[109], data[110], data[111], data[112],
+            data[207], data[208], data[209], data[210], data[211], data[212], data[213], data[214],
         ])
     } else {
         0
@@ -127,6 +129,7 @@ fuzz_target!(|data: &[u8]| {
     // Construct the ProofRecord - this should never panic or cause undefined behavior
     let _proof = ProofRecord {
         proof_id_hash,
+        predecessor_id_hash,
         commitment_hash,
         disclosure_policy_hash,
         issuer_address: dummy_address,
@@ -136,7 +139,7 @@ fuzz_target!(|data: &[u8]| {
         created_at,
         revoked_at,
         proof_type,
-        revoked_ledger: 0,
+        revoked_ledger,
         sequence_number,
         created_ledger,
         activates_at,

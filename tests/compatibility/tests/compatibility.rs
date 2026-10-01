@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(clippy::useless_vec)]
 //! Contract ABI and storage compatibility golden tests.
 //!
 //! These tests snapshot contract specs and gate unversioned changes.

@@ -289,7 +289,7 @@ impl Deployment<'_> {
             &self.env,
             &self.issuer,
             &self.proofs_address,
-            "register_proof",
+            "register_proof_with_type_identifier",
             (
                 &proof_id,
                 &commitment,

@@ -1,8 +1,15 @@
 [package]
-name = "compatibility"
+name = "contract-compatibility-gate"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
+publish = false
 
-[dependencies]
+[[test]]
+name = "compatibility"
+path = "tests/compatibility.rs"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde = { version = "1.0", features = ["derive"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }

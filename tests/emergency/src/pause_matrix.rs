@@ -120,7 +120,13 @@ fn matrix() -> std::vec::Vec<Case> {
             setup: no_setup,
             call: |d| {
                 let next = Address::generate(&d.env);
-                settled(d.config.try_set_admin(&next))
+                {
+                    let res = d.config.try_nominate_admin(&next);
+                    if res.is_ok() {
+                        let _ = d.config.try_accept_admin();
+                    }
+                    settled(res)
+                }
             },
         },
         Case {
@@ -200,22 +206,34 @@ fn matrix() -> std::vec::Vec<Case> {
             name: "issuer-registry::suspend_issuer",
             expected: Available,
             setup: no_setup,
-            call: |d| settled(d.issuers.try_suspend_issuer(&issuer_id_hash(&d.env, 1))),
+            call: |d| settled(d.issuers.try_suspend_issuer(
+                &issuer_id_hash(&d.env, 1),
+                &soroban_sdk::BytesN::from_array(&d.env, &[1u8; 32])
+            )),
         },
         Case {
             name: "issuer-registry::reactivate_issuer",
             expected: Available,
             setup: no_setup,
             call: |d| {
-                d.issuers.suspend_issuer(&issuer_id_hash(&d.env, 1));
-                settled(d.issuers.try_reactivate_issuer(&issuer_id_hash(&d.env, 1)))
+                d.issuers.suspend_issuer(
+                    &issuer_id_hash(&d.env, 1),
+                    &soroban_sdk::BytesN::from_array(&d.env, &[1u8; 32]),
+                );
+                settled(d.issuers.try_reactivate_issuer(
+                    &issuer_id_hash(&d.env, 1),
+                    &soroban_sdk::BytesN::from_array(&d.env, &[1u8; 32]),
+                ))
             },
         },
         Case {
             name: "issuer-registry::revoke_issuer",
             expected: Available,
             setup: no_setup,
-            call: |d| settled(d.issuers.try_revoke_issuer(&issuer_id_hash(&d.env, 1))),
+            call: |d| settled(d.issuers.try_revoke_issuer(
+                &issuer_id_hash(&d.env, 1),
+                &soroban_sdk::BytesN::from_array(&d.env, &[1u8; 32])
+            )),
         },
         Case {
             name: "issuer-registry::rotate_issuer_address",
@@ -277,12 +295,13 @@ fn matrix() -> std::vec::Vec<Case> {
             expected: Contained,
             setup: no_setup,
             call: |d| {
-                settled(d.proofs.try_register_proof(
+                settled(d.proofs.try_register_proof_with_type_identifier(
                     &hash(&d.env, 0x21),
                     &hash(&d.env, 0x22),
                     &d.issuer,
                     &APPROVED_SCHEMA,
                     &(d.env.ledger().timestamp() + 100_000),
+                    &soroban_sdk::BytesN::from_array(&d.env, &[1u8; 32]),
                 ))
             },
         },
@@ -402,12 +421,13 @@ fn containment_survives_repeated_pause_calls() {
     assert!(
         deployment
             .proofs
-            .try_register_proof(
+            .try_register_proof_with_type_identifier(
                 &hash(&deployment.env, 0x51),
                 &hash(&deployment.env, 0x52),
                 &deployment.issuer,
                 &APPROVED_SCHEMA,
                 &(deployment.env.ledger().timestamp() + 100_000),
+                &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32])
             )
             .is_err(),
         "repeated pause must keep registration contained"

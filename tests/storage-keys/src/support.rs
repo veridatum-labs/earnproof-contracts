@@ -65,6 +65,14 @@ pub fn schema_version_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaVersion"), version)
 }
 
+pub fn schema_version_index_key(env: &Env, index: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "SchemaVersionIndex"), index)
+}
+
+pub fn schema_version_index_count_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "SchemaVersionIndexCount"),)
+}
+
 #[allow(dead_code)]
 pub fn schema_record_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaRecord"), version)
@@ -85,6 +93,10 @@ pub fn schema_ttl_key(env: &Env, version: u32) -> (Symbol, u32) {
     (Symbol::new(env, "SchemaTtl"), version)
 }
 
+pub fn schema_predecessor_key(env: &Env, version: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "SchemaPredecessor"), version)
+}
+
 pub fn issuer_registry_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "IssuerRegistry"),)
 }
@@ -93,8 +105,20 @@ pub fn protocol_config_key(env: &Env) -> (Symbol,) {
     (Symbol::new(env, "ProtocolConfig"),)
 }
 
+pub fn proof_type_approved_key(env: &Env, proof_type: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofTypeApproved"), proof_type.clone())
+}
+
 pub fn issuer_key(id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (symbol_short!("Issuer"), id.clone())
+}
+
+pub fn issuer_index_key(env: &Env, index: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "IssuerIndex"), index)
+}
+
+pub fn issuer_index_count_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "IssuerIndexCount"),)
 }
 
 pub fn issuer_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
@@ -109,17 +133,86 @@ pub fn address_ttl_key(env: &Env, address: &Address) -> (Symbol, Address) {
     (Symbol::new(env, "AddressTtl"), address.clone())
 }
 
+pub fn active_issuer_count_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "ActiveIssuerCount"),)
+}
+
 pub fn proof_key(id: &BytesN<32>) -> (Symbol, BytesN<32>) {
     (symbol_short!("Proof"), id.clone())
 }
 
-pub fn consent_receipt_key(env: &Env, commitment_hash: &BytesN<32>) -> (Symbol, BytesN<32>) {
-    (Symbol::new(env, "ConsentReceipt"), commitment_hash.clone())
+pub fn proof_policy_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofPolicy"), id.clone())
+}
+
+pub fn proof_context_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofContext"), id.clone())
+}
+
+pub fn proof_subject_pseudonym_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofSubjectPseudonym"), id.clone())
+}
+
+pub fn genesis_key() -> (Symbol,) {
+    (symbol_short!("Genesis"),)
+}
+
+pub fn registry_epoch_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "RegistryEpoch"),)
+}
+
+pub fn successors_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "Successors"), id.clone())
+}
+
+pub fn reactivatable_at_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ReactivatableAt"), id.clone())
+}
+
+pub fn issuer_epoch_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "IssuerEpoch"),)
+}
+
+pub fn max_active_issuers_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "MaxActiveIssuers"),)
+}
+
+pub fn reactivation_cooldown_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "ReactivationCooldown"),)
+}
+pub fn proof_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofTtl"), id.clone())
 }
 
 #[allow(dead_code)]
-pub fn proof_ttl_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
-    (Symbol::new(env, "ProofTtl"), id.clone())
+pub fn proof_payload_meta_key(env: &Env, id: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (Symbol::new(env, "ProofPayloadMeta"), id.clone())
+}
+
+#[allow(dead_code)]
+pub fn schema_payload_limit_key(env: &Env, version: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "SchemaPayloadLimit"), version)
+}
+
+pub fn config_history_total_key(env: &Env) -> (Symbol,) {
+    (Symbol::new(env, "ConfigHistoryTotal"),)
+}
+
+#[allow(dead_code)]
+pub fn config_history_ring_key(env: &Env, slot: u32) -> (Symbol, u32) {
+    (Symbol::new(env, "ConfigHistoryRing"), slot)
+}
+
+pub fn issuer_active_proof_count_key(env: &Env, issuer: &Address) -> (Symbol, Address) {
+    (Symbol::new(env, "IssuerActiveProofCount"), issuer.clone())
+}
+
+pub fn issuer_lifetime_proof_count_key(env: &Env, issuer: &Address) -> (Symbol, Address) {
+    (Symbol::new(env, "IssuerLifetimeProofCount"), issuer.clone())
+}
+
+pub fn schema_rate_usage_key(env: &Env, schema: u32, start: u32) -> (Symbol, u32, u32) {
+    (Symbol::new(env, "SchemaRateUsage"), schema, start)
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +289,9 @@ pub fn deployment() -> Deployment {
     let config = ProtocolConfigContractClient::new(&env, &config_id);
     config.initialize(&admin);
     config.approve_schema_version(&1);
+    config.approve_proof_type(&soroban_sdk::BytesN::from_array(&env, &[1; 32]));
+    // Approve a successor version so the SchemaPredecessor namespace is written.
+    config.approve_schema_with_predecessor(&2, &1);
 
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
@@ -205,7 +301,14 @@ pub fn deployment() -> Deployment {
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
     proofs.initialize(&admin, &issuers_id, &config_id);
-    proofs.register_proof(&proof_id, &bytes32(&env, 6), &issuer, &1, &1_000_000);
+    proofs.register_proof_with_type_identifier(
+        &proof_id,
+        &bytes32(&env, 6),
+        &issuer,
+        &1,
+        &1_000_000,
+        &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
+    );
 
     Deployment {
         env,
@@ -231,6 +334,7 @@ pub fn exercised_deployment() -> Deployment {
     let rotated_issuer = Address::generate(&env);
     let suspended_issuer = Address::generate(&env);
     let revoked_issuer = Address::generate(&env);
+    let held_suspended_issuer = Address::generate(&env);
     let issuer_id = bytes32(&env, 1);
     let proof_id = bytes32(&env, 5);
 
@@ -238,53 +342,115 @@ pub fn exercised_deployment() -> Deployment {
     let config = ProtocolConfigContractClient::new(&env, &config_id);
     config.initialize(&admin);
     config.approve_schema_version(&1);
+    config.approve_proof_type(&soroban_sdk::BytesN::from_array(&env, &[1; 32]));
+    config.approve_proof_type(&soroban_sdk::BytesN::from_array(&env, &[2; 32]));
     config.approve_schema_version(&2);
     config.deprecate_schema_version(&2);
+    // Approve a successor with a lineage link so SchemaPredecessor is exercised.
+    config.approve_schema_with_predecessor(&3, &1);
+    config.set_schema_payload_limit(&1, &2_048);
     config.pause();
     config.unpause();
-    config.set_admin(&rotated_admin);
+    config.nominate_admin(&rotated_admin);
+    config.accept_admin();
 
     let issuers_id = env.register(IssuerRegistryContract, ());
     let issuers = IssuerRegistryContractClient::new(&env, &issuers_id);
     issuers.initialize(&admin);
+    issuers.grant_governance_role(
+        &bytes32(&env, 0x21),
+        &earnproof_shared::GovernanceRole::IssuerManagement,
+        &Address::generate(&env),
+        &env.ledger().sequence(),
+        &None,
+    );
     issuers.register_issuer(&issuer_id, &issuer, &bytes32(&env, 2), &bytes32(&env, 99));
     issuers.update_issuer(&issuer_id, &bytes32(&env, 3));
     issuers.rotate_issuer_address(&issuer_id, &rotated_issuer);
+    issuers.accept_issuer_address_rotation(&issuer_id);
     issuers.register_issuer(
         &bytes32(&env, 10),
         &suspended_issuer,
         &bytes32(&env, 11),
         &bytes32(&env, 99),
     );
-    issuers.suspend_issuer(&bytes32(&env, 10));
-    issuers.reactivate_issuer(&bytes32(&env, 10));
+    issuers.suspend_issuer(
+        &bytes32(&env, 10),
+        &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]),
+    );
+    issuers.reactivate_issuer(
+        &bytes32(&env, 10),
+        &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]),
+    );
+    issuers.rotate_issuer_address(&bytes32(&env, 10), &Address::generate(&env));
     issuers.register_issuer(
         &bytes32(&env, 20),
         &revoked_issuer,
         &bytes32(&env, 21),
         &bytes32(&env, 99),
     );
-    issuers.revoke_issuer(&bytes32(&env, 20));
+    issuers.revoke_issuer(
+        &bytes32(&env, 20),
+        &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]),
+    );
+    issuers.register_issuer(
+        &bytes32(&env, 30),
+        &held_suspended_issuer,
+        &bytes32(&env, 31),
+        &bytes32(&env, 99),
+    );
+    issuers.suspend_issuer(
+        &bytes32(&env, 30),
+        &soroban_sdk::BytesN::from_array(&env, &[2u8; 32]),
+    );
 
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
     proofs.initialize(&admin, &issuers_id, &config_id);
-    proofs.register_proof(
+    proofs.register_proof_with_type_identifier(
         &proof_id,
         &bytes32(&env, 6),
         &rotated_issuer,
         &1,
         &1_000_000,
+        &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
     );
-    proofs.commit_disclosure_consent(&proof_id, &bytes32(&env, 30), &1, &bytes32(&env, 31));
-    proofs.register_proof(
+    proofs.register_proof_with_predecessor(
+        &bytes32(&env, 11),
+        &bytes32(&env, 12),
+        &rotated_issuer,
+        &1,
+        &1_000_000,
+        &Some(proof_id.clone()),
+        &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
+    );
+    proofs.register_proof_with_type_identifier(
         &bytes32(&env, 7),
         &bytes32(&env, 8),
         &rotated_issuer,
         &1,
         &1_000_000,
+        &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
     );
     proofs.revoke_proof(&bytes32(&env, 7));
+    proofs.open_dispute(&proof_id, &rotated_issuer, &bytes32(&env, 30));
+    proofs.archive_proof(&bytes32(&env, 7));
+    proofs.pause_scope(&earnproof_shared::PauseScope::Updates);
+    proofs.unpause_scope(&earnproof_shared::PauseScope::Updates);
+    let wasm_hash_proofs = bytes32(&env, 0x93);
+    let pending_proofs = bytes32(&env, 0x96);
+    proofs.approve_upgrade(&wasm_hash_proofs, &2);
+    proofs.approve_upgrade(&pending_proofs, &3);
+
+    proofs.register_proof_with_type_identifier_and_payload(
+        &bytes32(&env, 9),
+        &bytes32(&env, 10),
+        &rotated_issuer,
+        &1,
+        &1_000_000,
+        &soroban_sdk::BytesN::from_array(&env, &[2; 32]),
+        &Bytes::from_array(&env, &[0xAB; 8]),
+    );
     config.pause();
 
     config.begin_migration(&2, &1);

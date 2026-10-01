@@ -9,7 +9,7 @@
 //! the fixtures usable as a compatibility contract for indexers rather than
 //! documentation that happened to be true once.
 
-use crate::harness::{hash, read_events, Deployment, ObservedEvent};
+use crate::harness::{hash, read_events, Deployment, ObservedEvent, APPROVED_SCHEMA};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, Symbol, TryFromVal, Val};
 
@@ -22,10 +22,20 @@ const DECLARED_EVENTS: &[(&str, &[&str])] = &[
     // protocol-config
     ("initialized", &["admin"]),
     ("admin_changed", &["new_admin"]),
+    (
+        "admin_transfer_nominated",
+        &["pending_admin", "nominated_by"],
+    ),
+    ("admin_transfer_accepted", &["new_admin"]),
+    (
+        "admin_transfer_cancelled",
+        &["pending_admin", "cancelled_by"],
+    ),
     ("paused", &["paused"]),
     ("unpaused", &["paused"]),
     ("schema_approved", &["version"]),
     ("schema_deprecated", &["version"]),
+    ("schema_predecessor_set", &["version", "predecessor"]),
     // issuer-registry
     (
         "issuer_registered",
@@ -33,20 +43,103 @@ const DECLARED_EVENTS: &[(&str, &[&str])] = &[
             "issuer_id_hash",
             "issuer_address",
             "metadata_hash",
+            "metadata_uri_hash",
+            "metadata_revision",
             "provenance_commitment",
             "created_at",
+            "epoch",
         ],
     ),
     (
         "issuer_metadata_updated",
-        &["issuer_id_hash", "metadata_hash", "updated_at"],
+        &[
+            "issuer_id_hash",
+            "metadata_hash",
+            "metadata_uri_hash",
+            "metadata_revision",
+            "updated_at",
+            "epoch",
+        ],
     ),
-    ("issuer_suspended", &["issuer_id_hash", "updated_at"]),
-    ("issuer_reactivated", &["issuer_id_hash", "updated_at"]),
-    ("issuer_revoked", &["issuer_id_hash", "updated_at"]),
+    (
+        "issuer_suspended",
+        &[
+            "issuer_id_hash",
+            "effective_ledger",
+            "effective_timestamp",
+            "reason_commitment",
+            "updated_at",
+            "epoch",
+        ],
+    ),
+    (
+        "issuer_reactivated",
+        &[
+            "issuer_id_hash",
+            "effective_ledger",
+            "effective_timestamp",
+            "reason_commitment",
+            "updated_at",
+            "epoch",
+        ],
+    ),
+    (
+        "issuer_revoked",
+        &[
+            "issuer_id_hash",
+            "effective_ledger",
+            "effective_timestamp",
+            "reason_commitment",
+            "updated_at",
+            "epoch",
+        ],
+    ),
     (
         "issuer_address_rotated",
-        &["issuer_id_hash", "old_address", "new_address", "updated_at"],
+        &[
+            "issuer_id_hash",
+            "old_address",
+            "new_address",
+            "updated_at",
+            "epoch",
+        ],
+    ),
+    // proof-registry
+    (
+        "proof_registered",
+        &[
+            "proof_id_hash",
+            "issuer_address",
+            "schema_version",
+            "created_ledger",
+            "created_at",
+            "expires_at",
+            "epoch",
+        ],
+    ),
+    (
+        "proof_registered_with_payload",
+        &[
+            "proof_id_hash",
+            "issuer_address",
+            "schema_version",
+            "created_ledger",
+            "created_at",
+            "expires_at",
+            "payload_len",
+            "payload_hash",
+            "epoch",
+        ],
+    ),
+    (
+        "proof_revoked",
+        &[
+            "proof_id_hash",
+            "revoked_at",
+            "revoked_ledger",
+            "by_admin",
+            "epoch",
+        ],
     ),
     (
         "consent_receipt_committed",
@@ -129,7 +222,15 @@ fn protocol_config_events_match_their_fixtures() {
     for event in deployment.capture(|| deployment.config.deprecate_schema_version(&4)) {
         assert_matches_fixture(&deployment.env, &event);
     }
-    for event in deployment.capture(|| deployment.config.set_admin(&successor)) {
+    // Schema lineage emits both the predecessor link and schema approval events.
+    for event in deployment.capture(|| deployment.config.approve_schema_with_predecessor(&9, &1)) {
+        assert_matches_fixture(&deployment.env, &event);
+    }
+    // Preserve the two-step administrator handoff and both of its event records.
+    for event in deployment.capture(|| {
+        deployment.config.nominate_admin(&successor);
+        deployment.config.accept_admin()
+    }) {
         assert_matches_fixture(&deployment.env, &event);
     }
 }
@@ -175,12 +276,21 @@ fn issuer_registry_events_match_their_fixtures() {
         assert_matches_fixture(&deployment.env, &event);
     }
 
-    for event in deployment.capture(|| deployment.issuers.suspend_issuer(&deployment.issuer_id)) {
+    for event in deployment.capture(|| {
+        deployment.issuers.suspend_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        )
+    }) {
         assert_matches_fixture(&deployment.env, &event);
     }
 
-    for event in deployment.capture(|| deployment.issuers.reactivate_issuer(&deployment.issuer_id))
-    {
+    for event in deployment.capture(|| {
+        deployment.issuers.reactivate_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        )
+    }) {
         assert_matches_fixture(&deployment.env, &event);
     }
 
@@ -192,7 +302,27 @@ fn issuer_registry_events_match_their_fixtures() {
         assert_matches_fixture(&deployment.env, &event);
     }
 
-    for event in deployment.capture(|| deployment.issuers.revoke_issuer(&deployment.issuer_id)) {
+    for event in deployment.capture(|| {
+        deployment.issuers.revoke_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        )
+    }) {
+        assert_matches_fixture(&deployment.env, &event);
+    }
+}
+
+#[test]
+fn proof_registry_events_match_their_fixtures() {
+    let deployment = Deployment::new();
+
+    let issuer_revoked = deployment.register_proof(0x21);
+    for event in deployment.capture(|| deployment.proofs.revoke_proof(&issuer_revoked)) {
+        assert_matches_fixture(&deployment.env, &event);
+    }
+
+    let admin_revoked = deployment.register_proof(0x22);
+    for event in deployment.capture(|| deployment.proofs.admin_revoke_proof(&admin_revoked)) {
         assert_matches_fixture(&deployment.env, &event);
     }
 }
@@ -227,11 +357,20 @@ fn every_declared_event_names_at_least_one_payload_field() {
 }
 
 #[test]
-fn proof_registry_declares_only_the_consent_commitment_event() {
-    let emitted_by_proof_registry = DECLARED_EVENTS
+fn proof_registry_declares_registration_and_revocation_events() {
+    let proof_events: std::vec::Vec<&str> = DECLARED_EVENTS
         .iter()
-        .filter(|(name, _)| name.starts_with("consent_"))
-        .count();
+        .map(|(name, _)| *name)
+        .filter(|name| name.starts_with("proof_"))
+        .collect();
 
-    assert_eq!(emitted_by_proof_registry, 1);
+    assert_eq!(
+        proof_events,
+        std::vec![
+            "proof_registered",
+            "proof_registered_with_payload",
+            "proof_revoked"
+        ],
+        "proof-registry event fixtures and docs/events.md must track every declared topic"
+    );
 }

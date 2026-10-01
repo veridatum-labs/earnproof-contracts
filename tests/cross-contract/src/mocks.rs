@@ -6,6 +6,7 @@
 //! ```text
 //! protocol-config: is_paused() -> bool
 //!                  is_schema_version_approved(u32) -> bool
+//!                  is_proof_type_approved(BytesN<32>) -> bool
 //! issuer-registry: is_active_address(Address) -> bool
 //! ```
 //!
@@ -29,8 +30,17 @@
 // deliberately unused.
 #![allow(dead_code)]
 
-use earnproof_shared::PauseScope;
+use earnproof_shared::{
+    InterfaceVersion, PauseScope, SchemaRateLimit, DEFAULT_SCHEMA_RATE_LIMIT,
+    DEFAULT_SCHEMA_RATE_WINDOW_LEDGERS,
+};
 use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env};
+
+/// The interface version a compatible substitute reports. Every substitute
+/// below answers `interface_version` so that `proof-registry::initialize` passes
+/// its dependency handshake and the scenario's chosen failure still surfaces
+/// where the test targets it — during registration — rather than at init.
+const COMPATIBLE_VERSION: InterfaceVersion = InterfaceVersion::new(1, 0, 0);
 
 /// Rejection raised by a substitute dependency.
 #[contracterror]
@@ -61,6 +71,10 @@ pub struct RejectsPauseRead;
 
 #[contractimpl]
 impl RejectsPauseRead {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_paused(_env: Env) -> Result<bool, MockError> {
         Err(MockError::DependencyRejected)
     }
@@ -72,6 +86,10 @@ impl RejectsPauseRead {
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
         true
     }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
+    }
 }
 
 /// Rejects boundary 2, after boundary 1 has already succeeded.
@@ -80,6 +98,10 @@ pub struct RejectsSchemaRead;
 
 #[contractimpl]
 impl RejectsSchemaRead {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_paused(_env: Env) -> bool {
         false
     }
@@ -91,14 +113,22 @@ impl RejectsSchemaRead {
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> Result<bool, MockError> {
         Err(MockError::DependencyRejected)
     }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
+    }
 }
 
-/// Rejects boundary 3, after both `protocol-config` reads have succeeded.
+/// Rejects the issuer-registry read after the protocol-config reads succeed.
 #[contract]
 pub struct RejectsIssuerRead;
 
 #[contractimpl]
 impl RejectsIssuerRead {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_active_address(_env: Env, _issuer_address: Address) -> Result<bool, MockError> {
         Err(MockError::DependencyRejected)
     }
@@ -119,6 +149,10 @@ pub struct MalformedPauseRead;
 
 #[contractimpl]
 impl MalformedPauseRead {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_paused(_env: Env) -> u32 {
         7
     }
@@ -130,6 +164,10 @@ impl MalformedPauseRead {
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
         true
     }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
+    }
 }
 
 /// Returns `u32` from boundary 2.
@@ -138,12 +176,20 @@ pub struct MalformedSchemaRead;
 
 #[contractimpl]
 impl MalformedSchemaRead {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_paused(_env: Env) -> bool {
         false
     }
 
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> u32 {
         7
+    }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
     }
 }
 
@@ -153,6 +199,10 @@ pub struct MalformedIssuerRead;
 
 #[contractimpl]
 impl MalformedIssuerRead {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_active_address(_env: Env, _issuer_address: Address) -> u32 {
         7
     }
@@ -174,12 +224,20 @@ pub struct ConfigWithoutSchemaRead;
 
 #[contractimpl]
 impl ConfigWithoutSchemaRead {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_paused(_env: Env) -> bool {
         false
     }
 
     pub fn is_scope_paused(_env: Env, _scope: PauseScope) -> bool {
         false
+    }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
     }
 }
 
@@ -191,6 +249,10 @@ pub struct IssuersWithChangedSignature;
 
 #[contractimpl]
 impl IssuersWithChangedSignature {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_active_address(_env: Env, _issuer_id_hash: BytesN<32>) -> bool {
         true
     }
@@ -211,6 +273,10 @@ pub struct ConfigRequiringAuth;
 
 #[contractimpl]
 impl ConfigRequiringAuth {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn set_guardian(env: Env, guardian: Address) {
         env.storage().instance().set(&MockKey::Guardian, &guardian);
     }
@@ -232,6 +298,17 @@ impl ConfigRequiringAuth {
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
         true
     }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
+    }
+
+    pub fn get_schema_rate_limit(_env: Env, _version: u32) -> SchemaRateLimit {
+        SchemaRateLimit {
+            max_registrations: DEFAULT_SCHEMA_RATE_LIMIT,
+            window_ledgers: DEFAULT_SCHEMA_RATE_WINDOW_LEDGERS,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +327,10 @@ pub struct RecordingConfig;
 
 #[contractimpl]
 impl RecordingConfig {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_paused(env: Env) -> bool {
         env.storage().persistent().set(&MockKey::Touched, &true);
         false
@@ -261,6 +342,17 @@ impl RecordingConfig {
 
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
         true
+    }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
+    }
+
+    pub fn get_schema_rate_limit(_env: Env, _version: u32) -> SchemaRateLimit {
+        SchemaRateLimit {
+            max_registrations: DEFAULT_SCHEMA_RATE_LIMIT,
+            window_ledgers: DEFAULT_SCHEMA_RATE_WINDOW_LEDGERS,
+        }
     }
 
     /// Whether the write performed during boundary 1 is still there.
@@ -283,6 +375,10 @@ pub struct SelfPausingConfig;
 
 #[contractimpl]
 impl SelfPausingConfig {
+    pub fn interface_version(_env: Env) -> InterfaceVersion {
+        COMPATIBLE_VERSION
+    }
+
     pub fn is_paused(env: Env) -> bool {
         let observed: bool = env
             .storage()
@@ -299,6 +395,17 @@ impl SelfPausingConfig {
 
     pub fn is_schema_version_approved(_env: Env, _version: u32) -> bool {
         true
+    }
+
+    pub fn is_proof_type_approved(_env: Env, _proof_type: BytesN<32>) -> bool {
+        true
+    }
+
+    pub fn get_schema_rate_limit(_env: Env, _version: u32) -> SchemaRateLimit {
+        SchemaRateLimit {
+            max_registrations: DEFAULT_SCHEMA_RATE_LIMIT,
+            window_ledgers: DEFAULT_SCHEMA_RATE_WINDOW_LEDGERS,
+        }
     }
 
     /// The flag as it stands now.

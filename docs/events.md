@@ -40,32 +40,58 @@ Each is asserted in [`tests/events/`](../tests/events/); the mapping is in
 | `unpaused` | `unpause` | `paused` (always `false`) |
 | `schema_approved` | `approve_schema_version` | `version` |
 | `schema_deprecated` | `deprecate_schema_version` | `version` |
+| `schema_predecessor_set` | `approve_schema_with_predecessor` | `version`, `predecessor` |
+
+`approve_schema_with_predecessor` approves a schema version and records the
+prior version it succeeds. It publishes `schema_predecessor_set` with the
+lineage link and `schema_approved` for the approval itself. A predecessor-less
+(root) approval publishes only `schema_approved`, exactly as
+`approve_schema_version` does.
 
 ### `issuer-registry`
 
 | Topic | Emitted by | Payload |
 |---|---|---|
-| `issuer_registered` | `register_issuer` | `issuer_id_hash`, `issuer_address`, `metadata_hash`, `created_at` |
-| `issuer_metadata_updated` | `update_issuer` | `issuer_id_hash`, `metadata_hash`, `updated_at` |
-| `issuer_suspended` | `suspend_issuer` | `issuer_id_hash`, `updated_at` |
-| `issuer_reactivated` | `reactivate_issuer` | `issuer_id_hash`, `updated_at` |
-| `issuer_revoked` | `revoke_issuer` | `issuer_id_hash`, `updated_at` |
+| `issuer_registered` | `register_issuer` | `issuer_id_hash`, `issuer_address`, `metadata_hash`, `metadata_uri_hash`, `metadata_revision`, `created_at` |
+| `issuer_metadata_updated` | `update_issuer`, `set_issuer_metadata_commitment` | `issuer_id_hash`, `metadata_hash`, `metadata_uri_hash`, `metadata_revision`, `updated_at` |
+| `issuer_suspended` | `suspend_issuer` | `issuer_id_hash`, `effective_ledger`, `effective_timestamp`, `updated_at` |
+| `issuer_reactivated` | `reactivate_issuer` | `issuer_id_hash`, `effective_ledger`, `effective_timestamp`, `updated_at` |
+| `issuer_revoked` | `revoke_issuer` | `issuer_id_hash`, `effective_ledger`, `effective_timestamp`, `updated_at` |
 | `issuer_address_rotated` | `rotate_issuer_address` | `issuer_id_hash`, `old_address`, `new_address`, `updated_at` |
 
 `issuer_address_rotated` carries both addresses so an indexer can update its
 address→issuer mapping without scanning storage. An indexer that ignores
 `old_address` will keep routing to a rotated-out key.
 
+`issuer_registered` and `issuer_metadata_updated` carry **both** metadata
+commitments. `metadata_hash` commits to the canonical metadata document
+(content); `metadata_uri_hash` commits to the canonical document URI (location),
+so an off-chain resolver can distinguish a change of location from a change of
+content. At registration `metadata_uri_hash` is the all-zero "no URI commitment
+recorded" sentinel until `set_issuer_metadata_commitment` sets it.
+`metadata_revision` starts at `1` and increments on every accepted metadata
+update. See [`metadata-commitment.md`](./metadata-commitment.md) for the
+canonical-byte and domain-separation rules.
+
+The status lifecycle events carry `effective_ledger` and `effective_timestamp`:
+the ledger sequence and timestamp at which the suspension, reactivation, or
+revocation became effective. Legacy records predating these fields carry the
+documented `0` sentinel.
+
 ### `proof-registry`
 
 | Topic | Emitted by | Payload |
 |---|---|---|
-| `consent_receipt_committed` | `commit_disclosure_consent` | `proof_id_hash`, `policy_hash`, `receipt_version`, `commitment_hash` |
+| `proof_registered` | `register_proof` | `proof_id_hash`, `issuer_address`, `schema_version`, `created_ledger`, `created_at`, `expires_at`, `epoch` |
+| `proof_revoked` | `revoke_proof`, `admin_revoke_proof` | `proof_id_hash`, `revoked_at`, `revoked_ledger`, `by_admin`, `epoch` |
 
-Consent commitments are indexed in persistent storage and also emitted for
-indexers. The event does not include the receipt hash input, verifier identity,
-or disclosed claims. Proof registration and revocation remain silent; proof
-state is read with `get_proof`, `is_valid_proof`, and `is_revoked`.
+`proof_registered` carries the on-chain creation timing, sourced from the
+ledger, and the registry epoch after the mutation. `proof_revoked` carries both
+revocation timing values and the epoch after revocation. The timing lets
+verifiers understand when a proof became invalid without a follow-up query;
+`by_admin` distinguishes an administrator revocation from an issuer revocation.
+For a legacy record without a recorded revocation sequence,
+`revoked_ledger` is `0` and `revoked_at` remains authoritative.
 
 ### Silent entry points
 
@@ -75,7 +101,6 @@ Not every mutation emits. These do not, and the omission is deliberate:
 |---|---|---|
 | `issuer-registry` | `initialize` | Only `protocol-config` announces initialization. An indexer keying deployment off an event should watch that contract. |
 | `proof-registry` | `initialize` | As above. |
-| `proof-registry` | `register_proof`, `revoke_proof`, `admin_revoke_proof` | Proof state remains queryable; these existing operations stay silent. |
 
 ## Topic naming
 

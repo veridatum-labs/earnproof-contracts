@@ -94,12 +94,15 @@ fn unpause_emits_unpaused_once_and_matches_state() {
 fn set_admin_emits_admin_changed_once_and_matches_state() {
     let deployment = Deployment::new();
     let successor = Address::generate(&deployment.env);
-    let events = deployment.capture(|| deployment.config.set_admin(&successor));
-    let event = expect_single(&deployment.env, &events, "admin_changed");
+    let events = deployment.capture(|| {
+        deployment.config.nominate_admin(&successor);
+        deployment.config.accept_admin()
+    });
+    let event = expect_single(&deployment.env, &events, "admin_transfer_accepted");
 
     let announced: Address = event
         .field(&deployment.env, "new_admin")
-        .expect("admin_changed event must carry a new_admin field");
+        .expect("admin_transfer_accepted event must carry a new_admin field");
 
     assert_eq!(announced, successor);
     assert_eq!(announced, deployment.config.get_admin());
@@ -186,7 +189,12 @@ fn update_issuer_emits_issuer_metadata_updated_once_and_matches_storage() {
 #[test]
 fn suspend_issuer_emits_issuer_suspended_once_and_matches_storage() {
     let deployment = Deployment::new();
-    let events = deployment.capture(|| deployment.issuers.suspend_issuer(&deployment.issuer_id));
+    let events = deployment.capture(|| {
+        deployment.issuers.suspend_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        )
+    });
     let event = expect_single(&deployment.env, &events, "issuer_suspended");
 
     let record = deployment.issuers.get_issuer(&deployment.issuer_id);
@@ -199,8 +207,16 @@ fn suspend_issuer_emits_issuer_suspended_once_and_matches_storage() {
 #[test]
 fn reactivate_issuer_emits_issuer_reactivated_once_and_matches_storage() {
     let deployment = Deployment::new();
-    deployment.issuers.suspend_issuer(&deployment.issuer_id);
-    let events = deployment.capture(|| deployment.issuers.reactivate_issuer(&deployment.issuer_id));
+    deployment.issuers.suspend_issuer(
+        &deployment.issuer_id,
+        &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+    );
+    let events = deployment.capture(|| {
+        deployment.issuers.reactivate_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        )
+    });
     let event = expect_single(&deployment.env, &events, "issuer_reactivated");
 
     let record = deployment.issuers.get_issuer(&deployment.issuer_id);
@@ -213,7 +229,12 @@ fn reactivate_issuer_emits_issuer_reactivated_once_and_matches_storage() {
 #[test]
 fn revoke_issuer_emits_issuer_revoked_once_and_matches_storage() {
     let deployment = Deployment::new();
-    let events = deployment.capture(|| deployment.issuers.revoke_issuer(&deployment.issuer_id));
+    let events = deployment.capture(|| {
+        deployment.issuers.revoke_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        )
+    });
     let event = expect_single(&deployment.env, &events, "issuer_revoked");
 
     let record = deployment.issuers.get_issuer(&deployment.issuer_id);
@@ -236,6 +257,16 @@ fn rotate_issuer_address_emits_both_old_and_new_address() {
             .issuers
             .rotate_issuer_address(&deployment.issuer_id, &replacement)
     });
+    let event = expect_single(&deployment.env, &events, "issuer_rotation_nominated");
+
+    let nominated_new: Address = event.field(&deployment.env, "new_address").unwrap();
+    assert_eq!(nominated_new, replacement);
+
+    let events = deployment.capture(|| {
+        deployment
+            .issuers
+            .accept_issuer_address_rotation(&deployment.issuer_id)
+    });
     let event = expect_single(&deployment.env, &events, "issuer_address_rotated");
 
     let announced_old: Address = event.field(&deployment.env, "old_address").unwrap();
@@ -249,23 +280,124 @@ fn rotate_issuer_address_emits_both_old_and_new_address() {
 }
 
 // ─── proof-registry ─────────────────────────────────────────────────────────
+//
+// proof-registry used to emit nothing (tracked as the known gap in
+// docs/events.md and issue #3). Exposing the registry epoch through typed
+// events, as required by issue #187, closes that gap for register_proof and
+// revoke_proof/admin_revoke_proof: each now publishes exactly one event
+// carrying the epoch it advanced to, matching the "at most one event per
+// invocation" rule the rest of this workspace follows.
 
 #[test]
-fn proof_registration_and_revocation_remain_silent() {
+fn register_proof_emits_proof_registered_with_the_advanced_epoch() {
     let deployment = Deployment::new();
+    let epoch_before = deployment.proofs.get_registry_epoch();
+    let proof_id = hash(&deployment.env, 0x11);
+    let expires_at = deployment.env.ledger().timestamp() + 100_000;
+
     let events = deployment.capture(|| {
-        let proof_id = deployment.register_proof(0x11);
-        deployment.proofs.admin_revoke_proof(&proof_id);
+        deployment.proofs.register_proof_with_type_identifier(
+            &proof_id,
+            &hash(&deployment.env, 0xEE),
+            &deployment.issuer,
+            &APPROVED_SCHEMA,
+            &expires_at,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        );
     });
-    let from_proof_registry: std::vec::Vec<_> = events
+
+    let event = expect_single(&deployment.env, &events, "proof_registered");
+    let announced_id: BytesN<32> = event
+        .field(&deployment.env, "proof_id_hash")
+        .expect("proof_registered event must carry proof_id_hash");
+    let announced_epoch: u32 = event
+        .field(&deployment.env, "epoch")
+        .expect("proof_registered event must carry epoch");
+    assert_eq!(announced_id, proof_id);
+    assert_eq!(announced_epoch, epoch_before + 1);
+    assert_eq!(deployment.proofs.get_registry_epoch(), epoch_before + 1);
+}
+
+#[test]
+fn revoke_proof_emits_timing_and_the_advanced_epoch() {
+    let deployment = Deployment::new();
+    let proof_id = deployment.register_proof(0x21);
+    let epoch_before = deployment.proofs.get_registry_epoch();
+
+    let events = deployment.capture(|| deployment.proofs.revoke_proof(&proof_id));
+    let event = expect_single(&deployment.env, &events, "proof_revoked");
+    let announced_id: BytesN<32> = event.field(&deployment.env, "proof_id_hash").unwrap();
+    let revoked_at: u64 = event.field(&deployment.env, "revoked_at").unwrap();
+    let revoked_ledger: u32 = event.field(&deployment.env, "revoked_ledger").unwrap();
+    let by_admin: bool = event.field(&deployment.env, "by_admin").unwrap();
+    let announced_epoch: u32 = event.field(&deployment.env, "epoch").unwrap();
+    let record = deployment.proofs.get_proof(&proof_id);
+
+    assert_eq!(announced_id, proof_id);
+    assert_eq!(revoked_at, record.revoked_at);
+    assert_eq!(revoked_ledger, record.revoked_ledger);
+    assert!(!by_admin);
+    assert_eq!(announced_epoch, epoch_before + 1);
+}
+
+#[test]
+fn admin_revoke_proof_emits_timing_and_admin_flag() {
+    let deployment = Deployment::new();
+    let proof_id = deployment.register_proof(0x22);
+
+    let events = deployment.capture(|| deployment.proofs.admin_revoke_proof(&proof_id));
+    let event = expect_single(&deployment.env, &events, "proof_revoked");
+    let by_admin: bool = event.field(&deployment.env, "by_admin").unwrap();
+    let record = deployment.proofs.get_proof(&proof_id);
+    let revoked_at: u64 = event.field(&deployment.env, "revoked_at").unwrap();
+    let revoked_ledger: u32 = event.field(&deployment.env, "revoked_ledger").unwrap();
+
+    assert!(by_admin);
+    assert_eq!(revoked_at, record.revoked_at);
+    assert_eq!(revoked_ledger, record.revoked_ledger);
+}
+
+#[test]
+fn a_rejected_registration_publishes_no_event_and_does_not_advance_the_epoch() {
+    let deployment = Deployment::new();
+    deployment.config.pause();
+    let epoch_before = deployment.proofs.get_registry_epoch();
+    let expires_at = deployment.env.ledger().timestamp() + 100_000;
+
+    let events = deployment.capture(|| {
+        let _ = deployment.proofs.try_register_proof_with_type_identifier(
+            &hash(&deployment.env, 0x31),
+            &hash(&deployment.env, 0x32),
+            &deployment.issuer,
+            &APPROVED_SCHEMA,
+            &expires_at,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        );
+    });
+
+    assert!(events.is_empty(), "a rejected call must publish nothing");
+    assert_eq!(deployment.proofs.get_registry_epoch(), epoch_before);
+}
+
+#[test]
+fn each_successful_proof_mutation_emits_one_proof_registry_event() {
+    let deployment = Deployment::new();
+    let registration_events = deployment.capture(|| deployment.register_proof(0x23));
+    let proof_events: std::vec::Vec<_> = registration_events
         .iter()
         .filter(|event| event.contract == deployment.proofs.address)
         .collect();
+    assert_eq!(proof_events.len(), 1);
+    assert!(proof_events[0].is(&deployment.env, "proof_registered"));
 
-    assert!(
-        from_proof_registry.is_empty(),
-        "proof registration and revocation do not emit consent events"
-    );
+    let proof_id = deployment.register_proof(0x24);
+    let revocation_events = deployment.capture(|| deployment.proofs.admin_revoke_proof(&proof_id));
+    let proof_events: std::vec::Vec<_> = revocation_events
+        .iter()
+        .filter(|event| event.contract == deployment.proofs.address)
+        .collect();
+    assert_eq!(proof_events.len(), 1);
+    assert!(proof_events[0].is(&deployment.env, "proof_revoked"));
 }
 
 #[test]

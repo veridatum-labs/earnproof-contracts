@@ -58,7 +58,7 @@ test = false
 doc = false
 
 [[bin]]
-name = "fuzz_entry_point_commit_disclosure_consent"
-path = "fuzz_targets/fuzz_entry_point_commit_disclosure_consent.rs"
+name = "fuzz_proof_context"
+path = "fuzz_targets/fuzz_proof_context.rs"
 test = false
 doc = false

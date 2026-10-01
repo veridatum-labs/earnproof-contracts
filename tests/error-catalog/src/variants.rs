@@ -44,8 +44,73 @@ fn declared_variants() -> std::vec::Vec<(&'static str, &'static str, u32)> {
         ),
         (
             "ContractError",
+            "InvalidAddress",
+            ContractError::InvalidAddress as u32
+        ),
+        (
+            "ContractError",
+            "NoUpgradeApproval",
+            ContractError::NoUpgradeApproval as u32
+        ),
+        (
+            "ContractError",
+            "UpgradeTimelockNotElapsed",
+            ContractError::UpgradeTimelockNotElapsed as u32
+        ),
+        (
+            "ContractError",
+            "UpgradeApprovalExpired",
+            ContractError::UpgradeApprovalExpired as u32
+        ),
+        (
+            "ContractError",
+            "WasmHashMismatch",
+            ContractError::WasmHashMismatch as u32
+        ),
+        (
+            "ContractError",
+            "InvalidTimingConfig",
+            ContractError::InvalidTimingConfig as u32
+        ),
+        (
+            "ContractError",
+            "BatchTooLarge",
+            ContractError::BatchTooLarge as u32
+        ),
+        (
+            "ContractError",
+            "IncompatibleInterfaceVersion",
+            ContractError::IncompatibleInterfaceVersion as u32
+        ),
+        (
+            "ContractError",
             "ProtocolPaused",
             ContractError::ProtocolPaused as u32
+        ),
+        (
+            "ContractError",
+            "ThresholdApprovalRequired",
+            ContractError::ThresholdApprovalRequired as u32
+        ),
+        (
+            "ContractError",
+            "ApprovalProposalNotFound",
+            ContractError::ApprovalProposalNotFound as u32
+        ),
+        (
+            "ContractError",
+            "ApprovalProposalExpired",
+            ContractError::ApprovalProposalExpired as u32
+        ),
+        (
+            "ContractError",
+            "InsufficientApprovals",
+            ContractError::InsufficientApprovals as u32
+        ),
+        (
+            "ContractError",
+            "InvalidApprovalPolicy",
+            ContractError::InvalidApprovalPolicy as u32
         ),
         (
             "IssuerError",
@@ -83,6 +148,36 @@ fn declared_variants() -> std::vec::Vec<(&'static str, &'static str, u32)> {
             IssuerError::InvalidTransition as u32
         ),
         (
+            "IssuerError",
+            "InvalidAddress",
+            IssuerError::InvalidAddress as u32
+        ),
+        (
+            "IssuerError",
+            "BatchTooLarge",
+            IssuerError::BatchTooLarge as u32
+        ),
+        (
+            "IssuerError",
+            "MaxBelowActiveUsage",
+            IssuerError::MaxBelowActiveUsage as u32
+        ),
+        (
+            "IssuerError",
+            "ReactivationCooldownActive",
+            IssuerError::ReactivationCooldownActive as u32
+        ),
+        (
+            "IssuerError",
+            "IssuerCapacityExceeded",
+            IssuerError::IssuerCapacityExceeded as u32
+        ),
+        (
+            "IssuerError",
+            "InvalidMetadataCommitment",
+            IssuerError::InvalidMetadataCommitment as u32
+        ),
+        (
             "ProofError",
             "ProofAlreadyRegistered",
             ProofError::ProofAlreadyRegistered as u32
@@ -106,6 +201,11 @@ fn declared_variants() -> std::vec::Vec<(&'static str, &'static str, u32)> {
             "ProofError",
             "InvalidSchemaVersion",
             ProofError::InvalidSchemaVersion as u32
+        ),
+        (
+            "ProofError",
+            "InvalidAddress",
+            ProofError::InvalidAddress as u32
         ),
         (
             "ProofError",
@@ -134,8 +234,73 @@ fn declared_variants() -> std::vec::Vec<(&'static str, &'static str, u32)> {
         ),
         (
             "ProofError",
-            "ConsentReceiptAlreadyCommitted",
-            ProofError::ConsentReceiptAlreadyCommitted as u32,
+            "InvalidBatchSize",
+            ProofError::InvalidBatchSize as u32,
+        ),
+        (
+            "ProofError",
+            "InvalidActivationTime",
+            ProofError::InvalidActivationTime as u32,
+        ),
+        (
+            "ProofError",
+            "DisputeAlreadyOpen",
+            ProofError::DisputeAlreadyOpen as u32,
+        ),
+        (
+            "ProofError",
+            "DisputeNotFound",
+            ProofError::DisputeNotFound as u32,
+        ),
+        (
+            "ProofError",
+            "DisputeNotOpen",
+            ProofError::DisputeNotOpen as u32,
+        ),
+        (
+            "ProofError",
+            "ProofCapacityReached",
+            ProofError::ProofCapacityReached as u32,
+        ),
+        (
+            "ProofError",
+            "ProofAccountingUnavailable",
+            ProofError::ProofAccountingUnavailable as u32,
+        ),
+        (
+            "ProofError",
+            "ProofCountOverflow",
+            ProofError::ProofCountOverflow as u32,
+        ),
+        (
+            "ProofError",
+            "UnsupportedProofType",
+            ProofError::UnsupportedProofType as u32,
+        ),
+        (
+            "ProofError",
+            "InvalidProofContext",
+            ProofError::InvalidProofContext as u32,
+        ),
+        (
+            "ProofError",
+            "CyclicSupersession",
+            ProofError::CyclicSupersession as u32,
+        ),
+        (
+            "ProofError",
+            "CrossIssuerSupersession",
+            ProofError::CrossIssuerSupersession as u32,
+        ),
+        (
+            "ProofError",
+            "PredecessorNotFound",
+            ProofError::PredecessorNotFound as u32,
+        ),
+        (
+            "ProofError",
+            "TooManySuccessors",
+            ProofError::TooManySuccessors as u32,
         ),
     ]
 }

@@ -45,7 +45,14 @@ fn config_attempts(d: &Deployment, signer: &Address) -> std::vec::Vec<(&'static 
     );
     out.push((
         "protocol-config::set_admin",
-        d.config.try_set_admin(&next).is_ok(),
+        {
+            let r = d.config.try_nominate_admin(&next);
+            if r.is_ok() {
+                let _ = d.config.try_accept_admin();
+            }
+            r
+        }
+        .is_ok(),
     ));
 
     let version = 7_u32;
@@ -127,7 +134,14 @@ fn a_former_admin_cannot_reclaim_authority_by_rotating_to_themselves() {
         "set_admin",
         (&former,).into_val(&deployment.env),
     );
-    assert!(deployment.config.try_set_admin(&former).is_err());
+    assert!({
+        let r = deployment.config.try_nominate_admin(&former);
+        if r.is_ok() {
+            let _ = deployment.config.try_accept_admin();
+        }
+        r
+    }
+    .is_err());
 
     assert_eq!(deployment.config.get_admin(), successor);
     assert!(
@@ -181,12 +195,27 @@ fn a_rotated_out_issuer_address_loses_issuer_status() {
         &old,
         &deployment.proofs_address,
         "register_proof",
-        (&proof_id, &commitment, &old, &APPROVED_SCHEMA, &expires_at).into_val(&deployment.env),
+        (
+            &proof_id,
+            &commitment,
+            &old,
+            &APPROVED_SCHEMA,
+            &expires_at,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
+        )
+            .into_val(&deployment.env),
     );
     assert!(
         deployment
             .proofs
-            .try_register_proof(&proof_id, &commitment, &old, &APPROVED_SCHEMA, &expires_at)
+            .try_register_proof_with_type_identifier(
+                &proof_id,
+                &commitment,
+                &old,
+                &APPROVED_SCHEMA,
+                &expires_at,
+                &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32])
+            )
             .is_err(),
         "a rotated-out issuer address must not register proofs"
     );
@@ -204,18 +233,20 @@ fn a_rotated_out_issuer_address_loses_issuer_status() {
             &replacement,
             &APPROVED_SCHEMA,
             &expires_at,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32]),
         )
             .into_val(&deployment.env),
     );
     assert!(
         deployment
             .proofs
-            .try_register_proof(
+            .try_register_proof_with_type_identifier(
                 &proof_id,
                 &commitment,
                 &replacement,
                 &APPROVED_SCHEMA,
-                &expires_at
+                &expires_at,
+                &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32])
             )
             .is_ok(),
         "the replacement address must be able to register proofs"
@@ -303,7 +334,10 @@ fn rotating_the_config_admin_does_not_move_registry_authority() {
     );
     assert!(deployment
         .issuers
-        .try_suspend_issuer(&deployment.issuer_id)
+        .try_suspend_issuer(
+            &deployment.issuer_id,
+            &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32])
+        )
         .is_err());
     deployment.assert_no_side_effects(&before, "config admin on suspend_issuer");
 

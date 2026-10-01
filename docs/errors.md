@@ -27,7 +27,7 @@ Backend mapping guidance, including how to handle a code this document does not 
 
 The protocol-config range is allocated but empty: that contract returns common errors only. The range stays reserved so a future protocol-config error cannot collide with anything.
 
-**Status** distinguishes a code that some contract path actually returns from one that is declared and reserved but produced by nothing in this release. Six codes are currently reserved, and the distinction matters in practice: see the ambiguity note below before writing a client that waits for one of them.
+**Status** distinguishes a code that some contract path actually returns from one that is declared and reserved but produced by nothing in this release. Eight codes are currently reserved, and the distinction matters in practice: see the ambiguity note below before writing a client that waits for one of them.
 
 **Retry** answers whether repeating the call can ever succeed:
 
@@ -86,7 +86,20 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 41 | `NotFound` | `ContractError` | common | reserved | after-caller-change | 404 |
 | 42 | `InvalidState` | `ContractError` | common | reserved | never | 400 |
 | 60 | `InvalidInput` | `ContractError` | common | returned | after-caller-change | 400 |
+| 61 | `InvalidAddress` | `ContractError` | common | returned | after-caller-change | 400 |
+| 62 | `IncompatibleInterfaceVersion` | `ContractError` | common | returned | after-caller-change | 400 |
+| 64 | `BatchTooLarge` | `ContractError` | common | returned | after-caller-change | 400 |
 | 80 | `ProtocolPaused` | `ContractError` | common | reserved | after-operator-action | 503 |
+| 90 | `NoUpgradeApproval` | `ContractError` | common | returned | after-operator-action | 403 |
+| 91 | `UpgradeTimelockNotElapsed` | `ContractError` | common | returned | after-operator-action | 409 |
+| 92 | `UpgradeApprovalExpired` | `ContractError` | common | returned | after-operator-action | 409 |
+| 93 | `WasmHashMismatch` | `ContractError` | common | returned | after-caller-change | 400 |
+| 94 | `InvalidTimingConfig` | `ContractError` | common | returned | after-caller-change | 400 |
+| 95 | `ThresholdApprovalRequired` | `ContractError` | common | returned | after-operator-action | 403 |
+| 96 | `ApprovalProposalNotFound` | `ContractError` | common | returned | after-caller-change | 404 |
+| 97 | `ApprovalProposalExpired` | `ContractError` | common | returned | after-operator-action | 409 |
+| 98 | `InsufficientApprovals` | `ContractError` | common | returned | after-operator-action | 403 |
+| 99 | `InvalidApprovalPolicy` | `ContractError` | common | returned | after-caller-change | 400 |
 | 200 | `IssuerAlreadyRegistered` | `IssuerError` | issuer-registry | returned | never | 409 |
 | 201 | `IssuerNotFound` | `IssuerError` | issuer-registry | returned | after-caller-change | 404 |
 | 202 | `IssuerAddressAlreadyRegistered` | `IssuerError` | issuer-registry | returned | never | 409 |
@@ -94,20 +107,39 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 204 | `IssuerRevoked` | `IssuerError` | issuer-registry | returned | never | 403 |
 | 205 | `IssuerInactive` | `IssuerError` | issuer-registry | reserved | after-operator-action | 403 |
 | 206 | `InvalidTransition` | `IssuerError` | issuer-registry | returned | never | 400 |
+| 207 | `InvalidAddress` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
+| 208 | `IssuerCapacityExceeded` | `IssuerError` | issuer-registry | returned | after-operator-action | 409 |
+| 209 | `MaxBelowActiveUsage` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
+| 210 | `ReactivationCooldownActive` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
+| 211 | `InvalidMetadataCommitment` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
+| 212 | `BatchTooLarge` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
 | 300 | `ProofAlreadyRegistered` | `ProofError` | proof-registry | returned | never | 409 |
 | 301 | `ProofNotFound` | `ProofError` | proof-registry | returned | after-caller-change | 404 |
 | 302 | `ProofAlreadyRevoked` | `ProofError` | proof-registry | returned | never | 400 |
 | 303 | `ProofExpired` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
-| 304 | `InvalidSchemaVersion` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 304 | `InvalidSchemaVersion` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
 | 305 | `SchemaVersionNotApproved` | `ProofError` | proof-registry | reserved | after-operator-action | 400 |
+| 306 | `InvalidAddress` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
 | 307 | `ContractPaused` | `ProofError` | proof-registry | returned | after-operator-action | 503 |
 | 308 | `IssuerInactive` | `ProofError` | proof-registry | returned | after-operator-action | 403 |
 | 309 | `UnsupportedSchema` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
-| 310 | `MalformedInput` | `ProofError` | proof-registry | reserved | after-caller-change | 400 |
-| 311 | `ConsentReceiptAlreadyCommitted` | `ProofError` | proof-registry | returned | never | 409 |
+| 310 | `MalformedInput` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
+| 311 | `InvalidBatchSize` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
+| 312 | `InvalidActivationTime` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
+| 313 | `DisputeAlreadyOpen` | `ProofError` | proof-registry | returned | never | 409 |
+| 314 | `DisputeNotFound` | `ProofError` | proof-registry | returned | after-caller-change | 404 |
+| 315 | `DisputeNotOpen` | `ProofError` | proof-registry | returned | never | 400 |
+| 316 | `UnsupportedProofType` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 317 | `InvalidProofContext` | `ProofError` | proof-registry | reserved | after-caller-change | 400 |
+| 318 | `ProofCapacityReached` | `ProofError` | proof-registry | returned | after-operator-action | 409 |
+| 319 | `ProofAccountingUnavailable` | `ProofError` | proof-registry | returned | after-operator-action | 503 |
+| 320 | `ProofCountOverflow` | `ProofError` | proof-registry | returned | after-operator-action | 503 |
+| 321 | `CyclicSupersession` | `ProofError` | proof-registry | returned | never | 400 |
+| 322 | `CrossIssuerSupersession` | `ProofError` | proof-registry | returned | never | 403 |
+| 323 | `PredecessorNotFound` | `ProofError` | proof-registry | returned | after-caller-change | 404 |
+| 324 | `TooManySuccessors` | `ProofError` | proof-registry | returned | never | 400 |
 
 ## Details
-
 ### 1 - `AlreadyInitialized`
 
 - Enum: `ContractError`
@@ -185,6 +217,39 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Suggested HTTP status: 400
 - Client message: "Invalid input provided"
 
+### 61 - `InvalidAddress`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-caller-change
+- Cause: A supplied address is not a valid non-sentinel account or contract address.
+- Remediation: Supply a canonical Stellar account or contract address that is not reserved as a sentinel.
+- Suggested HTTP status: 400
+- Client message: "Invalid address"
+
+### 62 - `IncompatibleInterfaceVersion`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-caller-change
+- Cause: A cross-contract dependency reported an interface version outside the range the consumer accepts, during initialization or a governed dependency replacement.
+- Remediation: Bind a dependency whose interface version is compatible: same major and at least the minor and patch the consumer requires. Read the accepted version from the consumer before retrying.
+- Suggested HTTP status: 400
+- Client message: "Incompatible dependency version"
+
+### 64 - `BatchTooLarge`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-caller-change
+- Cause: get_schema_statuses was given more schema versions than the bounded batch limit.
+- Remediation: Split the request into batches of at most MAX_SCHEMA_STATUS_BATCH entries.
+- Suggested HTTP status: 400
+- Client message: "Request batch is too large"
+
 ### 80 - `ProtocolPaused`
 
 - Enum: `ContractError`
@@ -195,6 +260,116 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Remediation: Poll is_paused rather than waiting for this code: a paused protocol surfaces as 304 in the current release. Treat both as the same operator-action outcome.
 - Suggested HTTP status: 503
 - Client message: "Service temporarily paused"
+
+### 90 - `NoUpgradeApproval`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-operator-action
+- Cause: An upgrade was attempted without a recorded approval.
+- Remediation: Have the authorized admin approve the target WASM and version before retrying.
+- Suggested HTTP status: 403
+- Client message: "No upgrade approval was found"
+
+### 91 - `UpgradeTimelockNotElapsed`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-operator-action
+- Cause: The approved upgrade was attempted before its earliest execution ledger.
+- Remediation: Wait until the approval's earliest execution ledger, then retry with the approved hash and version.
+- Suggested HTTP status: 409
+- Client message: "Upgrade timelock has not elapsed"
+
+### 92 - `UpgradeApprovalExpired`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-operator-action
+- Cause: The approved upgrade was attempted at or after its expiration ledger.
+- Remediation: Request a fresh upgrade approval and retry within its execution window.
+- Suggested HTTP status: 409
+- Client message: "Upgrade approval has expired"
+
+### 93 - `WasmHashMismatch`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-caller-change
+- Cause: The upgrade supplied a WASM hash different from the approved hash.
+- Remediation: Install the exact WASM artifact whose hash was approved, or obtain approval for the intended artifact.
+- Suggested HTTP status: 400
+- Client message: "WASM hash does not match approval"
+
+### 94 - `InvalidTimingConfig`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-caller-change
+- Cause: An upgrade or governance timing configuration has inconsistent or invalid ledger bounds.
+- Remediation: Choose valid timing values whose activation and expiry bounds are ordered and representable.
+- Suggested HTTP status: 400
+- Client message: "Invalid timing configuration"
+
+### 95 - `ThresholdApprovalRequired`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-operator-action
+- Cause: A critical action requires a threshold-approved proposal instead of direct execution.
+- Remediation: Create a proposal for the canonical action, collect the configured signer threshold, and execute that proposal.
+- Suggested HTTP status: 403
+- Client message: "Threshold approval is required"
+
+### 96 - `ApprovalProposalNotFound`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-caller-change
+- Cause: The requested critical-action proposal does not exist or has already been consumed.
+- Remediation: Use an existing proposal identifier for this contract, or create a new proposal.
+- Suggested HTTP status: 404
+- Client message: "Approval proposal not found"
+
+### 97 - `ApprovalProposalExpired`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-operator-action
+- Cause: The critical-action proposal reached its expiry ledger before execution.
+- Remediation: Create a new proposal and collect approvals again.
+- Suggested HTTP status: 409
+- Client message: "Approval proposal has expired"
+
+### 98 - `InsufficientApprovals`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-operator-action
+- Cause: The proposal has fewer unique authorized signer approvals than its policy threshold.
+- Remediation: Collect approvals from additional configured signers before execution.
+- Suggested HTTP status: 403
+- Client message: "Approval threshold has not been reached"
+
+### 99 - `InvalidApprovalPolicy`
+
+- Enum: `ContractError`
+- Domain: common
+- Status: returned
+- Retry: after-caller-change
+- Cause: The approval policy has an invalid threshold, signer count, or duplicate signer.
+- Remediation: Configure a non-empty unique signer set with a threshold between one and the signer count.
+- Suggested HTTP status: 400
+- Client message: "Invalid approval policy"
 
 ### 200 - `IssuerAlreadyRegistered`
 
@@ -273,6 +448,72 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Suggested HTTP status: 400
 - Client message: "Invalid status transition"
 
+### 207 - `InvalidAddress`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: Issuer registration, rotation, or lifecycle input contains an invalid address or reserved empty commitment.
+- Remediation: Supply a canonical issuer address and nonzero commitment values required by the selected operation.
+- Suggested HTTP status: 400
+- Client message: "Invalid issuer address or commitment"
+
+### 208 - `IssuerCapacityExceeded`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: register_issuer or reactivate_issuer would push the active-issuer count above the governed maximum capacity.
+- Remediation: Wait for an issuer to be suspended or revoked, or have an admin raise the maximum active-issuer capacity. Read get_active_issuer_count and get_max_active_issuers to see the headroom.
+- Suggested HTTP status: 409
+- Client message: "Issuer capacity reached"
+
+### 209 - `MaxBelowActiveUsage`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: set_max_active_issuers was asked to set a limit below the current active-issuer count without the explicit below-usage override.
+- Remediation: Pass a limit at or above the current active count, or set the override flag to ratchet the ceiling down deliberately. Retrying the identical request will fail identically.
+- Suggested HTTP status: 400
+- Client message: "Capacity limit below current usage"
+
+### 210 - `ReactivationCooldownActive`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: reactivate_issuer was called before the suspended issuer's reactivation cooldown had elapsed.
+- Remediation: Wait until the ledger time returned by get_earliest_reactivation before retrying. The deadline is fixed at suspension time and does not move.
+- Suggested HTTP status: 400
+- Client message: "Reactivation cooldown has not elapsed"
+
+### 211 - `InvalidMetadataCommitment`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: set_issuer_metadata_commitment was called with the all-zero digest for the content hash or the URI hash, which is reserved as the "no URI commitment recorded" sentinel.
+- Remediation: Compute a real SHA-256 commitment over the canonical document or URI bytes and resubmit; the all-zero digest is never accepted.
+- Suggested HTTP status: 400
+- Client message: "Invalid identity digest"
+
+### 212 - `BatchTooLarge`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: get_issuer_statuses was given more issuer identifiers than the bounded batch limit.
+- Remediation: Split the request into batches of at most MAX_ISSUER_STATUS_BATCH entries.
+- Suggested HTTP status: 400
+- Client message: "Request batch is too large"
+
 ### 300 - `ProofAlreadyRegistered`
 
 - Enum: `ProofError`
@@ -322,9 +563,9 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Enum: `ProofError`
 - Domain: proof-registry
 - Status: returned
-- Retry: after-operator-action
-- Cause: register_proof was given schema version zero, or a precondition that the registry currently reports through this same code failed: the protocol is paused, or the issuer address is not active.
-- Remediation: Check three things in order: that the schema version is non-zero, that is_paused is false, and that is_active_address is true for the issuer. This code is overloaded in the current release; see the ambiguity note in docs/errors.md.
+- Retry: after-caller-change
+- Cause: register_proof was given schema version zero.
+- Remediation: Use a nonzero schema version. Check protocol pause, issuer activity, schema approval, and proof-type approval separately when registration is rejected.
 - Suggested HTTP status: 400
 - Client message: "Invalid schema version"
 
@@ -338,6 +579,17 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Remediation: A protocol operator must approve the version. A registry pointed at an uninitialized protocol config also returns UnsupportedSchema (309).
 - Suggested HTTP status: 400
 - Client message: "Schema version not approved"
+
+### 306 - `InvalidAddress`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: The issuer address is not a valid issuing address for this proof registry.
+- Remediation: Supply an active issuer account address distinct from the proof registry and its configuration dependencies.
+- Suggested HTTP status: 400
+- Client message: "Invalid issuer address"
 
 ### 307 - `ContractPaused`
 
@@ -376,22 +628,165 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 
 - Enum: `ProofError`
 - Domain: proof-registry
-- Status: reserved
+- Status: returned
 - Retry: after-caller-change
-- Cause: Reserved for when proof input data fails format or size validation. No contract path currently returns this code; it is allocated so the code is never reused for a different meaning.
-- Remediation: Validate the proof input data against the schema before resubmitting. Ensure all required fields are present and data sizes conform to the schema limits.
+- Cause: register_proof_with_payload was given an auxiliary payload larger than the schema's governed limit (protocol-config's get_schema_payload_limit for that version).
+- Remediation: Call get_schema_payload_limit for the schema version and shrink the payload to fit, or use register_proof without a payload if none is required.
 - Suggested HTTP status: 400
 - Client message: "Malformed proof input"
 
-### 311 - `ConsentReceiptAlreadyCommitted`
+### 311 - `InvalidBatchSize`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: A batch registration or batch revocation call was given zero entries, or more entries than MAX_PROOF_BATCH_SIZE.
+- Remediation: Split the request into batches of between one and MAX_PROOF_BATCH_SIZE entries.
+- Suggested HTTP status: 400
+- Client message: "Invalid batch size"
+
+### 312 - `InvalidActivationTime`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: register_proof_with_activation was given an activates_at at or after expires_at, so the proof could never be valid.
+- Remediation: Choose an activation time strictly before the expiration.
+- Suggested HTTP status: 400
+- Client message: "Invalid activation time"
+
+### 313 - `DisputeAlreadyOpen`
 
 - Enum: `ProofError`
 - Domain: proof-registry
 - Status: returned
 - Retry: never
-- Cause: commit_disclosure_consent was called with a commitment already indexed by the proof registry.
-- Remediation: Treat the consent receipt commitment as already recorded. Use a distinct salted receipt hash or receipt version for a different receipt.
+- Cause: open_dispute was called for a proof that already has an Open dispute.
+- Remediation: Withdraw, resolve, or reject the existing dispute before opening a new one. Retrying the identical request will not help: the dispute is cleared by a different call (from the disputant or the admin), not by this one succeeding on its own.
 - Suggested HTTP status: 409
-- Client message: "Consent receipt already committed"
+- Client message: "A dispute is already open for this proof"
+
+### 314 - `DisputeNotFound`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: withdraw_dispute, resolve_dispute, or reject_dispute referenced a proof with no dispute record.
+- Remediation: Open a dispute first, or confirm the proof id.
+- Suggested HTTP status: 404
+- Client message: "No dispute found for this proof"
+
+### 315 - `DisputeNotOpen`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: A dispute transition was attempted on a dispute that is not Open (already withdrawn, resolved, or rejected).
+- Remediation: Read the dispute's current status; it is terminal once withdrawn, resolved, or rejected.
+- Suggested HTTP status: 400
+- Client message: "Dispute is not open"
+
+### 316 - `UnsupportedProofType`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: The proof type identifier is not supported by the protocol config.
+- Remediation: Call is_proof_type_approved on the protocol config contract to verify the proof type is approved. An operator must approve the proof type before it can be used for proof registration.
+- Suggested HTTP status: 400
+- Client message: "Proof type not supported"
+
+### 317 - `InvalidProofContext`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: reserved
+- Retry: after-caller-change
+- Cause: The network passphrase or native/issued asset identifier is not canonical, or the passphrase does not match the ledger network.
+- Remediation: Use the exact active Stellar network passphrase and either Native or a case-sensitive ASCII alphanumeric asset code with a valid account issuer.
+- Suggested HTTP status: 400
+- Client message: "Invalid proof network or asset context"
+
+### 318 - `ProofCapacityReached`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: The proof registry has reached its configured capacity.
+- Remediation: An operator must increase the proof capacity or archive eligible proofs before registration can continue.
+- Suggested HTTP status: 409
+- Client message: "Proof registry capacity reached"
+
+### 319 - `ProofAccountingUnavailable`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: Stored proof counts are missing or inconsistent, so an accounting operation cannot proceed safely.
+- Remediation: Reconcile proof counts and verify the reported counters before retrying the operation.
+- Suggested HTTP status: 503
+- Client message: "Proof accounting is unavailable"
+
+### 320 - `ProofCountOverflow`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: A proof count cannot be incremented without overflowing its storage type.
+- Remediation: Reconcile the proof counters or raise the configured capacity before registering more proofs.
+- Suggested HTTP status: 503
+- Client message: "Proof count limit reached"
+
+### 321 - `CyclicSupersession`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The proof identifier matches its own predecessor or would create a supersession cycle.
+- Remediation: A proof cannot supersede itself or create a cycle. Register the renewal as a forward link from an existing proof.
+- Suggested HTTP status: 400
+- Client message: "Cyclic supersession detected"
+
+### 322 - `CrossIssuerSupersession`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The predecessor proof was registered by a different issuer.
+- Remediation: Cross-issuer supersession is rejected unless protocol policy explicitly supports it.
+- Suggested HTTP status: 403
+- Client message: "Cross-issuer supersession rejected"
+
+### 323 - `PredecessorNotFound`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: The specified predecessor proof was not found.
+- Remediation: Ensure the predecessor proof exists and remains historically queryable.
+- Suggested HTTP status: 404
+- Client message: "Predecessor proof not found"
+
+### 324 - `TooManySuccessors`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The predecessor proof already has the maximum number of successors.
+- Remediation: A predecessor can only have a bounded number of successors.
+- Suggested HTTP status: 400
+- Client message: "Too many successors"
 
 <!-- END GENERATED -->

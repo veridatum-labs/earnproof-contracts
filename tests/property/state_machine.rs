@@ -60,6 +60,7 @@ fn setup_proof() -> (
     let issuer_address = Address::from_str(&env, ISSUER);
     protocol.initialize(&admin);
     protocol.approve_schema_version(&1);
+    protocol.approve_proof_type(&soroban_sdk::BytesN::from_array(&env, &[1u8; 32]));
     issuer_registry.initialize(&admin);
     issuer_registry.register_issuer(
         &bytes(&env, 9),
@@ -99,9 +100,9 @@ proptest! {
 
             let before = client.get_issuer(&issuer_id);
             let success = try_op(&env, || match op_kind {
-                0 => { client.suspend_issuer(&issuer_id); }
-                1 => { client.reactivate_issuer(&issuer_id); }
-                _ => { client.revoke_issuer(&issuer_id); }
+                0 => { client.suspend_issuer(&issuer_id, &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32])); }
+                1 => { client.reactivate_issuer(&issuer_id, &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32])); }
+                _ => { client.revoke_issuer(&issuer_id, &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32])); }
             });
             prop_assert_eq!(success, expected_success, "iteration {}", i);
 
@@ -155,7 +156,7 @@ proptest! {
         let proof_id = bytes(&env, 1);
         let expires_at = base_time + expires_delta;
         let success = try_op(&env, || {
-            proof.register_proof(&proof_id, &bytes(&env, 2), &issuer_address, &1, &expires_at);
+            proof.register_proof_with_type_identifier(&proof_id, &bytes(&env, 2), &issuer_address, &1, &expires_at, &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]));
         });
         prop_assert!(success);
 
@@ -179,6 +180,29 @@ proptest! {
     }
 
     #[test]
+    fn schema_validity_duration_boundaries(
+        duration in 0_u64..=12,
+    ) {
+        let (env, proof, protocol, _issuer_registry, _admin, issuer_address, base_time) = setup_proof();
+        let proof_types = soroban_sdk::vec![&env, 17_u32];
+        protocol.set_schema_policy(&2, &proof_types, &10);
+        protocol.approve_schema_version(&2);
+
+        let proof_id = bytes(&env, duration as u8);
+        let expires_at = base_time.checked_add(duration).unwrap();
+        let result = proof.try_register_proof_with_policy(
+            &proof_id,
+            &bytes(&env, 2),
+            &issuer_address,
+            &2,
+            &expires_at,
+            &17,
+            &1,
+        );
+        prop_assert_eq!(result.is_ok(), (1..=10).contains(&duration));
+    }
+
+    #[test]
     fn paused_protocol_blocks_new_registration(
         pauses in prop::collection::vec(any::<bool>(), 0..10),
     ) {
@@ -193,7 +217,7 @@ proptest! {
 
         let proof_id = bytes(&env, 1);
         let success = try_op(&env, || {
-            proof.register_proof(&proof_id, &bytes(&env, 2), &issuer_address, &1, &2_000);
+            proof.register_proof_with_type_identifier(&proof_id, &bytes(&env, 2), &issuer_address, &1, &2_000, &soroban_sdk::BytesN::from_array(&env, &[1u8; 32]));
         });
         let exists = try_op(&env, || { proof.get_proof(&proof_id); });
 
@@ -229,7 +253,7 @@ proptest! {
                     } else {
                         admin.clone()
                     };
-                    let result = try_op(&env, || { client.set_admin(&new_admin); });
+                    let result = try_op(&env, || { { client.nominate_admin(&new_admin); client.accept_admin(); } });
                     prop_assert!(result);
                     current_admin = new_admin;
                 }

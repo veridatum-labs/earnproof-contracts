@@ -14,6 +14,8 @@ import type {
   ProofStatus,
   IssuerRecord,
   ProofRecord,
+  ProofPolicySnapshot,
+  SchemaPolicy,
   BindingProvenance,
   // Protocol Config
   InitializeProtocolConfigParams,
@@ -34,6 +36,14 @@ import type {
   DeprecateSchemaVersionResult,
   IsSchemaVersionApprovedParams,
   IsSchemaVersionApprovedResult,
+  SetSchemaPolicyParams,
+  SetSchemaPolicyResult,
+  GetSchemaPolicyParams,
+  GetSchemaPolicyResult,
+  SetCommitmentAlgorithmParams,
+  SetCommitmentAlgorithmResult,
+  IsAlgorithmSupportedParams,
+  IsAlgorithmSupportedResult,
   GetConfigVersionParams,
   GetConfigVersionResult,
   // Issuer Registry
@@ -66,12 +76,16 @@ import type {
   InitializeProofRegistryResult,
   RegisterProofParams,
   RegisterProofResult,
+  RegisterProofWithPolicyParams,
+  RegisterProofWithPolicyResult,
   RevokeProofParams,
   RevokeProofResult,
   AdminRevokeProofParams,
   AdminRevokeProofResult,
   GetProofParams,
   GetProofResult,
+  GetProofPolicySnapshotParams,
+  GetProofPolicySnapshotResult,
   IsValidProofParams,
   IsValidProofResult,
   IsRevokedParams,
@@ -87,6 +101,7 @@ import type {
   GetProtocolConfigParams,
   GetProtocolConfigResult,
 } from '../types';
+import { CommitmentAlgorithm, LEGACY_PROOF_TYPE } from '../types';
 
 import type { EarnProofClientConfig, ContractInvocationError } from '../client';
 import * as fs from 'fs';
@@ -269,6 +284,12 @@ describe('Contract Bindings', () => {
       expect(record.expires_at).toBeDefined();
       expect(record.created_at).toBeDefined();
       expect(record.revoked_at).toBeDefined();
+    });
+
+    it('SharedTypes: policy identifiers have stable numeric values', () => {
+      expect(LEGACY_PROOF_TYPE).toBe(0);
+      expect(CommitmentAlgorithm.LegacySha256).toBe(0);
+      expect(CommitmentAlgorithm.Sha256CanonicalV1).toBe(1);
     });
   });
 
@@ -511,6 +532,35 @@ describe('Contract Bindings', () => {
       expect(result).toBeUndefined();
     });
 
+    it('policy registration and policy query types compile', () => {
+      const params: RegisterProofWithPolicyParams = {
+        proof_id_hash: testHash,
+        commitment_hash: testHash,
+        issuer_address: testAddress,
+        schema_version: 1,
+        expires_at: BigInt(Date.now() + 3600000),
+        proof_type: 4,
+        commitment_algorithm: CommitmentAlgorithm.Sha256CanonicalV1,
+      };
+      const snapshot: ProofPolicySnapshot = {
+        proof_type: params.proof_type,
+        commitment_algorithm: params.commitment_algorithm,
+        max_validity_seconds: 3600n,
+      };
+      const policy: SchemaPolicy = {
+        proof_types: [params.proof_type],
+        max_validity_seconds: 3600n,
+      };
+      const registrationResult: RegisterProofWithPolicyResult = undefined;
+      const queryParams: GetProofPolicySnapshotParams = { proof_id_hash: testHash };
+      const queryResult: GetProofPolicySnapshotResult = snapshot;
+
+      expect(policy.proof_types).toEqual([4]);
+      expect(queryParams.proof_id_hash).toBe(testHash);
+      expect(queryResult.max_validity_seconds).toBe(3600n);
+      expect(registrationResult).toBeUndefined();
+    });
+
     it('revoke_proof params and result types compile', () => {
       const params: RevokeProofParams = { proof_id_hash: testHash };
       const result: RevokeProofResult = undefined;
@@ -678,8 +728,7 @@ describe('Contract Bindings', () => {
   // ────────────────────────────────────────────────────────────
 
   describe('API surface coverage', () => {
-    it('types.ts exports 33 parameter interfaces', () => {
-      // This documents that all 31 contract functions have parameter types
+    it('types.ts exports policy parameter interfaces', () => {
       const paramTypes = [
         'InitializeProtocolConfigParams',
         'GetAdminProtocolConfigParams',
@@ -690,6 +739,10 @@ describe('Contract Bindings', () => {
         'ApproveSchemaVersionParams',
         'DeprecateSchemaVersionParams',
         'IsSchemaVersionApprovedParams',
+        'SetSchemaPolicyParams',
+        'GetSchemaPolicyParams',
+        'SetCommitmentAlgorithmParams',
+        'IsAlgorithmSupportedParams',
         'GetConfigVersionParams',
         'InitializeIssuerRegistryParams',
         'GetAdminIssuerRegistryParams',
@@ -705,9 +758,11 @@ describe('Contract Bindings', () => {
         'GetIssuerByAddressParams',
         'InitializeProofRegistryParams',
         'RegisterProofParams',
+        'RegisterProofWithPolicyParams',
         'RevokeProofParams',
         'AdminRevokeProofParams',
         'GetProofParams',
+        'GetProofPolicySnapshotParams',
         'IsValidProofParams',
         'IsRevokedParams',
         'CommitDisclosureConsentParams',
@@ -717,11 +772,10 @@ describe('Contract Bindings', () => {
         'GetProtocolConfigParams',
       ];
 
-      expect(paramTypes.length).toBe(35); // 33 functions + shared types
+      expect(paramTypes.length).toBe(38);
     });
 
-    it('types.ts exports 33 result type aliases', () => {
-      // This documents that all 33 contract functions have result types
+    it('types.ts exports policy result type aliases', () => {
       const resultTypes = [
         'InitializeProtocolConfigResult',
         'GetAdminProtocolConfigResult',
@@ -732,6 +786,10 @@ describe('Contract Bindings', () => {
         'ApproveSchemaVersionResult',
         'DeprecateSchemaVersionResult',
         'IsSchemaVersionApprovedResult',
+        'SetSchemaPolicyResult',
+        'GetSchemaPolicyResult',
+        'SetCommitmentAlgorithmResult',
+        'IsAlgorithmSupportedResult',
         'GetConfigVersionResult',
         'InitializeIssuerRegistryResult',
         'GetAdminIssuerRegistryResult',
@@ -747,9 +805,11 @@ describe('Contract Bindings', () => {
         'GetIssuerByAddressResult',
         'InitializeProofRegistryResult',
         'RegisterProofResult',
+        'RegisterProofWithPolicyResult',
         'RevokeProofResult',
         'AdminRevokeProofResult',
         'GetProofResult',
+        'GetProofPolicySnapshotResult',
         'IsValidProofResult',
         'IsRevokedResult',
         'CommitDisclosureConsentResult',
@@ -759,7 +819,7 @@ describe('Contract Bindings', () => {
         'GetProtocolConfigResult',
       ];
 
-      expect(resultTypes.length).toBe(33);
+      expect(resultTypes.length).toBe(38);
     });
   });
 

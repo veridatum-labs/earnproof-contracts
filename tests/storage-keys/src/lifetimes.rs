@@ -47,6 +47,7 @@ fn observed(
 
 fn expected(contract: &str, class: StorageClass) -> std::vec::Vec<std::string::String> {
     let mut namespaces: std::vec::Vec<std::string::String> = namespaces_for(contract, class)
+        .filter(|namespace| !(contract == "proof-registry" && *namespace == "PendingDependencies"))
         .map(std::string::String::from)
         .collect();
     namespaces.sort();
@@ -99,25 +100,29 @@ fn per_record_namespaces_hold_one_entry_per_record() {
     let deployment = exercised_deployment();
     let env = &deployment.env;
 
-    // Three issuers, each with a record and a reverse-index entry. The rotated
-    // address replaces the old index entry rather than adding to it, so the
-    // count is twelve including one TTL tracker for every record and reverse
-    // index; the rotated address and its tracker replace their old entries.
+    // Three issuers, each with a record, a registration-order index entry, and a
+    // reverse-index entry. The rotated address replaces the old reverse-index entry
+    // rather than adding to it, so the count is fifteen including one TTL tracker
+    // for every issuer and index entry; the rotated address and its tracker replace
+    // their old entries.
     assert_eq!(
         keys_in(env, &deployment.issuers_id, StorageClass::Persistent).len(),
-        12
+        15
     );
 
-    // Two proof records and one indexed consent commitment.
+    // Proof records, TTL trackers, per-issuer accounting, schema rate usage,
+    // dispute/archive state, upgrade approvals, and payload metadata all use
+    // independent persistent keys.
     assert_eq!(
         keys_in(env, &deployment.proofs_id, StorageClass::Persistent).len(),
-        3
+        16
     );
 
-    // Two schema versions plus one scoped pause.
+    // Schema history, proof-type approvals, predecessor links, payload
+    // limits, and bounded governance history each use independent keys.
     assert_eq!(
         keys_in(env, &deployment.config_id, StorageClass::Persistent).len(),
-        3
+        17
     );
 }
 

@@ -1,0 +1,32 @@
+{
+  "event": "ConsentReceiptCommitted",
+  "contract": "proof-registry",
+  "contract_version": "0.1.0",
+  "schema_version": 1,
+  "topics": ["ConsentReceiptCommitted"],
+  "payload": {
+    "proof_id_hash": {
+      "type": "BytesN<32>",
+      "description": "Hash of the registered proof identifier.",
+      "example": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "policy_hash": {
+      "type": "BytesN<32>",
+      "description": "Hash of the disclosure policy accepted by the verifier.",
+      "example": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "receipt_version": {
+      "type": "U32",
+      "description": "Canonical receipt format version.",
+      "example": 1
+    },
+    "commitment_hash": {
+      "type": "BytesN<32>",
+      "description": "Network- and registry-scoped consent receipt commitment.",
+      "example": "3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  },
+  "emitted_by": "commit_disclosure_consent",
+  "description": "Emitted when an issuer commits a disclosure-consent receipt hash for an active proof.",
+  "compatibility": "additive"
+}

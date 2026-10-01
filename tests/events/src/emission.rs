@@ -399,3 +399,42 @@ fn each_successful_proof_mutation_emits_one_proof_registry_event() {
     assert_eq!(proof_events.len(), 1);
     assert!(proof_events[0].is(&deployment.env, "proof_revoked"));
 }
+
+#[test]
+fn consent_commitment_event_contains_only_public_hash_metadata() {
+    let deployment = Deployment::new();
+    let proof_id = deployment.register_proof(0x21);
+    let policy_hash = hash(&deployment.env, 0x22);
+    let receipt_hash = hash(&deployment.env, 0x23);
+    let mut commitment = None;
+    let events = deployment.capture(|| {
+        commitment = Some(deployment.proofs.commit_disclosure_consent(
+            &proof_id,
+            &policy_hash,
+            &1,
+            &receipt_hash,
+        ));
+    });
+    let event = expect_single(&deployment.env, &events, "consent_receipt_committed");
+    let commitment = commitment.expect("commit call returns its indexed commitment");
+
+    let announced_proof: BytesN<32> = event.field(&deployment.env, "proof_id_hash").unwrap();
+    let announced_policy: BytesN<32> = event.field(&deployment.env, "policy_hash").unwrap();
+    let announced_version: u32 = event.field(&deployment.env, "receipt_version").unwrap();
+    let announced_commitment: BytesN<32> = event.field(&deployment.env, "commitment_hash").unwrap();
+
+    assert_eq!(announced_proof, proof_id);
+    assert_eq!(announced_policy, policy_hash);
+    assert_eq!(announced_version, 1);
+    assert_eq!(announced_commitment, commitment);
+    assert_eq!(event.field_count(&deployment.env), 4);
+    assert!(event
+        .field::<BytesN<32>>(&deployment.env, "receipt_hash")
+        .is_none());
+    assert!(event
+        .field::<Address>(&deployment.env, "verifier")
+        .is_none());
+    assert!(deployment
+        .proofs
+        .has_consent_receipt_commitment(&commitment));
+}

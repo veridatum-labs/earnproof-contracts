@@ -74,6 +74,8 @@ enum DataKey {
     AllowedWasm(BytesN<32>),
     /// Monotonically-increasing contract version.  Prevents downgrade.
     ContractVersion,
+    /// Hash-only index for immutable disclosure-consent commitments.
+    ConsentReceipt(BytesN<32>),
     Successor,
     Decommissioned,
     Successors(BytesN<32>),
@@ -2738,6 +2740,149 @@ mod test {
         );
         assert_eq!(result, Err(Ok(ProofError::ProofAlreadyRegistered)));
     }
+    #[test]
+    fn commits_and_indexes_hash_only_disclosure_receipts() {
+        let (env, client, ..) = setup();
+        let proof_id = bytes(&env, 0x31);
+        let issuer = Address::from_str(&env, ISSUER);
+        let policy_hash = bytes(&env, 0x32);
+        let receipt_hash = bytes(&env, 0x33);
+        client.register_proof(&proof_id, &bytes(&env, 0x34), &issuer, &1, &2_000);
+
+        let commitment =
+            client.commit_disclosure_consent(&proof_id, &policy_hash, &1, &receipt_hash);
+
+        assert!(client.has_consent_receipt_commitment(&commitment));
+        env.as_contract(&client.address, || {
+            assert!(env
+                .storage()
+                .persistent()
+                .has(&DataKey::ConsentReceipt(commitment.clone())));
+            assert_eq!(
+                env.storage()
+                    .persistent()
+                    .get::<_, bool>(&DataKey::ConsentReceipt(commitment.clone())),
+                Some(true)
+            );
+            assert!(
+                env.storage()
+                    .persistent()
+                    .get_ttl(&DataKey::ConsentReceipt(commitment.clone()))
+                    > TTL_THRESHOLD_LEDGERS
+            );
+        });
+    }
+
+    #[test]
+    fn rejects_duplicate_and_distinguishes_receipt_versions() {
+        let (env, client, ..) = setup();
+        let proof_id = bytes(&env, 0x41);
+        let issuer = Address::from_str(&env, ISSUER);
+        let policy_hash = bytes(&env, 0x42);
+        let receipt_hash = bytes(&env, 0x43);
+        client.register_proof(&proof_id, &bytes(&env, 0x44), &issuer, &1, &2_000);
+
+        let first = client.commit_disclosure_consent(&proof_id, &policy_hash, &7, &receipt_hash);
+        let duplicate =
+            client.try_commit_disclosure_consent(&proof_id, &policy_hash, &7, &receipt_hash);
+        let next_version =
+            client.commit_disclosure_consent(&proof_id, &policy_hash, &8, &receipt_hash);
+
+        assert_eq!(
+            duplicate,
+            Err(Ok(ProofError::ConsentReceiptAlreadyCommitted))
+        );
+        assert_ne!(first, next_version);
+        assert!(client.has_consent_receipt_commitment(&first));
+        assert!(client.has_consent_receipt_commitment(&next_version));
+    }
+
+    #[test]
+    fn rejects_consent_commitment_for_revoked_proof() {
+        let (env, client, ..) = setup();
+        let proof_id = bytes(&env, 0x51);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 0x52), &issuer, &1, &2_000);
+        client.revoke_proof(&proof_id);
+
+        let result = client.try_commit_disclosure_consent(
+            &proof_id,
+            &bytes(&env, 0x53),
+            &1,
+            &bytes(&env, 0x54),
+        );
+
+        assert_eq!(result, Err(Ok(ProofError::ProofAlreadyRevoked)));
+    }
+
+    #[test]
+    fn consent_receipt_commitment_is_scoped_to_proof_and_policy() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let first_proof = bytes(&env, 0x61);
+        let second_proof = bytes(&env, 0x62);
+        let policy_hash = bytes(&env, 0x63);
+        let receipt_hash = bytes(&env, 0x64);
+        client.register_proof(&first_proof, &bytes(&env, 0x65), &issuer, &1, &2_000);
+        client.register_proof(&second_proof, &bytes(&env, 0x66), &issuer, &1, &2_000);
+
+        let first = client.commit_disclosure_consent(&first_proof, &policy_hash, &1, &receipt_hash);
+        let other_proof =
+            client.commit_disclosure_consent(&second_proof, &policy_hash, &1, &receipt_hash);
+        let other_policy =
+            client.commit_disclosure_consent(&first_proof, &bytes(&env, 0x67), &1, &receipt_hash);
+
+        assert_ne!(first, other_proof);
+        assert_ne!(first, other_policy);
+    }
+
+    #[test]
+    fn rejects_missing_proof_and_expired_proof_without_indexing() {
+        let (env, client, ..) = setup();
+        let proof_id = bytes(&env, 0x71);
+        let policy_hash = bytes(&env, 0x72);
+        let receipt_hash = bytes(&env, 0x73);
+        let missing =
+            client.try_commit_disclosure_consent(&proof_id, &policy_hash, &1, &receipt_hash);
+        assert_eq!(missing, Err(Ok(ProofError::ProofNotFound)));
+
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 0x74), &issuer, &1, &100);
+        env.ledger().set_timestamp(101);
+        let expired =
+            client.try_commit_disclosure_consent(&proof_id, &policy_hash, &1, &receipt_hash);
+        assert_eq!(expired, Err(Ok(ProofError::ProofExpired)));
+
+        let would_be_commitment = disclosure_consent_commitment(
+            &env,
+            &env.ledger().network_id(),
+            &client.address,
+            &proof_id,
+            &policy_hash,
+            1,
+            &receipt_hash,
+        );
+        assert!(!client.has_consent_receipt_commitment(&would_be_commitment));
+    }
+
+    #[test]
+    fn consent_receipt_accepts_at_proof_expiry_boundary() {
+        let (env, client, ..) = setup();
+        let proof_id = bytes(&env, 0x81);
+        let issuer = Address::from_str(&env, ISSUER);
+        client.register_proof(&proof_id, &bytes(&env, 0x82), &issuer, &1, &100);
+        env.ledger().set_timestamp(100);
+
+        let result = client.try_commit_disclosure_consent(
+            &proof_id,
+            &bytes(&env, 0x83),
+            &u32::MAX,
+            &bytes(&env, 0x84),
+        );
+
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn rejects_unapproved_schema_version() {
         let (env, client, _protocol_config, _issuer_registry, _issuer_registry_id) = setup();

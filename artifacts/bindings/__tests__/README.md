@@ -12,10 +12,10 @@ Comprehensive test suite for TypeScript contract bindings with 100+ test cases.
 - **Type shapes** — Compile-time safety for all types
 - **Protocol Config fixtures** — All 10 functions' param/result types
 - **Issuer Registry fixtures** — All 12 functions' param/result types
-- **Proof Registry fixtures** — All 10 functions' param/result types
+- **Proof Registry fixtures** — All 12 functions' param/result types
 - **Spec files** — JSON structure validation
 - **Binding files** — File existence and header verification
-- **API surface** — 31 parameter interfaces and 31 result types
+- **API surface** — 33 parameter interfaces and 33 result types
 - **Determinism** — Reproducible generation
 - **Error types** — ContractInvocationError structure
 - **Security** — No hardcoded secrets or contract IDs
@@ -28,7 +28,7 @@ Comprehensive test suite for TypeScript contract bindings with 100+ test cases.
 
 - **Client construction** — Valid/invalid configurations
 - **Configuration validation** — Address and key format checks
-- **Method signatures** — All 31 public methods exist
+- **Method signatures** — All 33 public methods exist
 - **Error types** — ContractInvocationError behavior
 - **Edge cases** — Testnet/mainnet, timeout values
 - **Type safety** — Compile-time checking documentation
@@ -70,9 +70,9 @@ npm test -- --config jest.config.js --coverage
 ## Test Coverage
 
 - **Provenance**: 100% (all fields validated)
-- **Types**: 100% (all 31 functions covered)
+- **Types**: 100% (all 33 functions covered)
 - **Configuration**: 100% (valid/invalid scenarios)
-- **Methods**: 100% (31 public methods)
+- **Methods**: 100% (33 public methods)
 - **Errors**: 100% (error structure)
 - **Security**: 100% (hardcoded secrets)
 

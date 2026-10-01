@@ -141,6 +141,15 @@ const DECLARED_EVENTS: &[(&str, &[&str])] = &[
             "epoch",
         ],
     ),
+    (
+        "consent_receipt_committed",
+        &[
+            "proof_id_hash",
+            "policy_hash",
+            "receipt_version",
+            "commitment_hash",
+        ],
+    ),
 ];
 
 /// Looks up the declared payload fields for a topic.

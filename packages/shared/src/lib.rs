@@ -241,6 +241,30 @@ pub fn proof_registry_digest(
     env.crypto().sha256(&payload).to_bytes()
 }
 
+/// Canonical, network- and registry-scoped disclosure-consent commitment.
+pub fn disclosure_consent_commitment(
+    env: &Env,
+    network_id: &BytesN<32>,
+    registry_address: &Address,
+    proof_id_hash: &BytesN<32>,
+    policy_hash: &BytesN<32>,
+    receipt_version: u32,
+    receipt_hash: &BytesN<32>,
+) -> BytesN<32> {
+    let payload = (
+        1_u32,
+        Symbol::new(env, "earnproof_consent_receipt"),
+        network_id.clone(),
+        registry_address.clone(),
+        proof_id_hash.clone(),
+        policy_hash.clone(),
+        receipt_version,
+        receipt_hash.clone(),
+    )
+        .to_xdr(env);
+    env.crypto().sha256(&payload).to_bytes()
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TtlHealth {

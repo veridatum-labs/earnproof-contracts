@@ -90,6 +90,10 @@ import type {
   IsValidProofResult,
   IsRevokedParams,
   IsRevokedResult,
+  CommitDisclosureConsentParams,
+  CommitDisclosureConsentResult,
+  HasConsentReceiptCommitmentParams,
+  HasConsentReceiptCommitmentResult,
   GetAdminProofRegistryParams,
   GetAdminProofRegistryResult,
   GetIssuerRegistryParams,
@@ -601,6 +605,24 @@ describe('Contract Bindings', () => {
       expect(typeof result).toBe('boolean');
     });
 
+    it('consent commitment params and result types compile', () => {
+      const params: CommitDisclosureConsentParams = {
+        proof_id_hash: testHash,
+        policy_hash: testHash,
+        receipt_version: 1,
+        receipt_hash: testHash,
+      };
+      const result: CommitDisclosureConsentResult = testHash;
+      const lookupParams: HasConsentReceiptCommitmentParams = {
+        commitment_hash: result,
+      };
+      const lookupResult: HasConsentReceiptCommitmentResult = true;
+
+      expect(params.receipt_version).toBe(1);
+      expect(lookupParams.commitment_hash).toBe(result);
+      expect(lookupResult).toBe(true);
+    });
+
     it('get_admin params and result types compile', () => {
       const params: GetAdminProofRegistryParams = {};
       const result: GetAdminProofRegistryResult = testAddress;
@@ -743,6 +765,8 @@ describe('Contract Bindings', () => {
         'GetProofPolicySnapshotParams',
         'IsValidProofParams',
         'IsRevokedParams',
+        'CommitDisclosureConsentParams',
+        'HasConsentReceiptCommitmentParams',
         'GetAdminProofRegistryParams',
         'GetIssuerRegistryParams',
         'GetProtocolConfigParams',
@@ -788,6 +812,8 @@ describe('Contract Bindings', () => {
         'GetProofPolicySnapshotResult',
         'IsValidProofResult',
         'IsRevokedResult',
+        'CommitDisclosureConsentResult',
+        'HasConsentReceiptCommitmentResult',
         'GetAdminProofRegistryResult',
         'GetIssuerRegistryResult',
         'GetProtocolConfigResult',

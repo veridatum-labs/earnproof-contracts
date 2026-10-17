@@ -23,6 +23,12 @@
 97	ApprovalProposalExpired	ContractError	common	returned	after-operator-action	409
 98	InsufficientApprovals	ContractError	common	returned	after-operator-action	403
 99	InvalidApprovalPolicy	ContractError	common	returned	after-caller-change	400
+100	HashAlgorithmNotFound	ProtocolConfigError	protocol-config	returned	after-caller-change	404
+101	InvalidHashAlgorithmTransition	ProtocolConfigError	protocol-config	returned	never	409
+102	HashAlgorithmDeprecated	ProtocolConfigError	protocol-config	returned	after-caller-change	400
+103	InvalidHashAlgorithmId	ProtocolConfigError	protocol-config	returned	after-caller-change	400
+104	HashAlgorithmNotActive	ProtocolConfigError	protocol-config	returned	after-operator-action	409
+105	RegistryUnavailable	ProtocolConfigError	protocol-config	returned	after-operator-action	503
 200	IssuerAlreadyRegistered	IssuerError	issuer-registry	returned	never	409
 201	IssuerNotFound	IssuerError	issuer-registry	returned	after-caller-change	404
 202	IssuerAddressAlreadyRegistered	IssuerError	issuer-registry	returned	never	409
@@ -65,3 +71,11 @@
 324	TooManySuccessors	ProofError	proof-registry	returned	never	400
 325	DisputeFilingWindowClosed	ProofError	proof-registry	returned	never	400
 326	UnsupportedNullifierDomain	ProofError	proof-registry	returned	after-operator-action	400
+327	StalePolicyVersion	ProofError	proof-registry	returned	after-caller-change	409
+328	ActivationNotEligible	ProofError	proof-registry	returned	never	409
+329	ActivationAlreadyAcknowledged	ProofError	proof-registry	returned	never	409
+330	UnauthorizedActivator	ProofError	proof-registry	returned	after-caller-change	403
+331	ResolverConflictOfInterest	ProofError	proof-registry	returned	never	403
+332	ResolverNotRegistered	ProofError	proof-registry	returned	after-operator-action	403
+333	InvalidPolicyVersion	ProofError	proof-registry	returned	after-caller-change	400
+334	ParticipantCommitmentLocked	ProofError	proof-registry	returned	never	409

@@ -20,6 +20,11 @@ use earnproof_shared::{
     MIGRATION_STATUS_VERSION, PROTOCOL_CONFIG_INTERFACE_VERSION, SHA256_COMMITMENT_ALGORITHM_V1,
     TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
 };
+use earnproof_shared::{
+    hash_algorithm_activate, hash_algorithm_approve, hash_algorithm_deprecate,
+    hash_algorithm_permits, HashAlgorithmRecord, HashAlgorithmUse,
+    ProtocolConfigError,
+};
 use soroban_sdk::{
     contract, contractevent, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, Symbol,
     Vec,
@@ -44,6 +49,8 @@ enum DataKey {
     SchemaLifecycle(u32),
     SchemaRateLimit(u32),
     CommitmentAlgorithm(u32),
+    /// Governed commitment hash algorithm lifecycle record, keyed by id.
+    HashAlgorithm(u32),
     ProofTypeApproved(BytesN<32>),
     PendingAdmin,
     PendingAdminNominatedAt,
@@ -130,6 +137,30 @@ pub struct Paused {
 #[contractevent]
 pub struct Unpaused {
     pub paused: bool,
+}
+
+/// Emitted when governance approves a commitment hash algorithm.
+#[contractevent]
+pub struct HashAlgorithmApproved {
+    pub algorithm_id: u32,
+    pub revision: u32,
+    pub approved_at: u64,
+}
+
+/// Emitted when an approved algorithm becomes usable for new commitments.
+#[contractevent]
+pub struct HashAlgorithmActivated {
+    pub algorithm_id: u32,
+    pub revision: u32,
+    pub activated_at: u64,
+}
+
+/// Emitted when an algorithm stops creating commitments. It stays verifiable.
+#[contractevent]
+pub struct HashAlgorithmDeprecated {
+    pub algorithm_id: u32,
+    pub revision: u32,
+    pub deprecated_at: u64,
 }
 
 #[contractevent]
@@ -983,6 +1014,105 @@ impl ProtocolConfigContract {
             }
         }
         chain
+    }
+
+    // ── commitment hash algorithm registry ────────────────────────────────────
+
+    /// Admin-only: approves a new commitment hash algorithm identifier.
+    /// Approval alone does not allow new commitments; see
+    /// [`Self::activate_hash_algorithm`]. Identifier zero is reserved and an
+    /// identifier can be approved only once.
+    pub fn approve_hash_algorithm(env: Env, algorithm_id: u32) -> Result<(), ProtocolConfigError> {
+        Self::hash_algorithm_admin(&env)?;
+        let key = DataKey::HashAlgorithm(algorithm_id);
+        let record = hash_algorithm_approve(
+            env.storage().persistent().get(&key),
+            algorithm_id,
+            env.ledger().timestamp(),
+        )?;
+        Self::store_hash_algorithm(&env, &key, &record);
+        HashAlgorithmApproved {
+            algorithm_id,
+            revision: record.revision,
+            approved_at: record.approved_at,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Admin-only: makes an approved algorithm usable for new commitments.
+    pub fn activate_hash_algorithm(env: Env, algorithm_id: u32) -> Result<(), ProtocolConfigError> {
+        Self::hash_algorithm_admin(&env)?;
+        let key = DataKey::HashAlgorithm(algorithm_id);
+        let record = hash_algorithm_activate(
+            env.storage().persistent().get(&key),
+            env.ledger().timestamp(),
+        )?;
+        Self::store_hash_algorithm(&env, &key, &record);
+        HashAlgorithmActivated {
+            algorithm_id,
+            revision: record.revision,
+            activated_at: record.activated_at,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Admin-only: deprecates an approved or active algorithm. Deprecation is
+    /// terminal. Existing commitments stay verifiable; new ones are rejected.
+    pub fn deprecate_hash_algorithm(
+        env: Env,
+        algorithm_id: u32,
+    ) -> Result<(), ProtocolConfigError> {
+        Self::hash_algorithm_admin(&env)?;
+        let key = DataKey::HashAlgorithm(algorithm_id);
+        let record = hash_algorithm_deprecate(
+            env.storage().persistent().get(&key),
+            env.ledger().timestamp(),
+        )?;
+        Self::store_hash_algorithm(&env, &key, &record);
+        HashAlgorithmDeprecated {
+            algorithm_id,
+            revision: record.revision,
+            deprecated_at: record.deprecated_at,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    pub fn get_hash_algorithm(env: Env, algorithm_id: u32) -> Option<HashAlgorithmRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::HashAlgorithm(algorithm_id))
+    }
+
+    /// True only for an `Active` algorithm.
+    pub fn can_create_commitment(env: Env, algorithm_id: u32) -> bool {
+        Self::check_hash_algorithm(env, algorithm_id, true).is_ok()
+    }
+
+    /// True for `Active` and `Deprecated` algorithms.
+    pub fn can_verify_commitment(env: Env, algorithm_id: u32) -> bool {
+        Self::check_hash_algorithm(env, algorithm_id, false).is_ok()
+    }
+
+    /// Typed check for cross-contract callers. `for_creation` selects between
+    /// creating a new commitment and verifying an existing one.
+    pub fn check_hash_algorithm(
+        env: Env,
+        algorithm_id: u32,
+        for_creation: bool,
+    ) -> Result<(), ProtocolConfigError> {
+        let usage = if for_creation {
+            HashAlgorithmUse::CreateCommitment
+        } else {
+            HashAlgorithmUse::VerifyCommitment
+        };
+        let record: Option<HashAlgorithmRecord> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::HashAlgorithm(algorithm_id));
+        hash_algorithm_permits(record.as_ref(), usage)
     }
 
     pub fn approve_schema_version(env: Env, version: u32) -> Result<(), ContractError> {
@@ -2438,6 +2568,23 @@ impl ProtocolConfigContract {
             return Err(ContractError::InvalidInput);
         }
         Ok(())
+    }
+
+    fn hash_algorithm_admin(env: &Env) -> Result<Address, ProtocolConfigError> {
+        Self::ensure_not_decommissioned(env)
+            .map_err(|_| ProtocolConfigError::RegistryUnavailable)?;
+        let admin =
+            Self::get_admin(env.clone()).map_err(|_| ProtocolConfigError::RegistryUnavailable)?;
+        Self::require_auth(&admin);
+        Ok(admin)
+    }
+
+    fn store_hash_algorithm(env: &Env, key: &DataKey, record: &HashAlgorithmRecord) {
+        env.storage().persistent().set(key, record);
+        env.storage()
+            .persistent()
+            .extend_ttl(key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
+        Self::bump_config_version(env.clone());
     }
 
     fn bump_config_version(env: Env) {

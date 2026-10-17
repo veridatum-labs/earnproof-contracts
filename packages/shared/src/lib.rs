@@ -4,7 +4,10 @@ use soroban_sdk::{
     contracterror, contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
 
+pub mod policy_bindings;
 pub mod storage_namespaces;
+
+pub use policy_bindings::*;
 
 pub use storage_namespaces::{StorageClass, StorageNamespace, STORAGE_NAMESPACES};
 pub mod error_catalog;
@@ -793,6 +796,26 @@ pub enum ProofError {
     /// The requested subject-nullifier domain version is not currently
     /// supported by protocol governance.
     UnsupportedNullifierDomain = 326,
+    /// The caller pinned an authority policy version that is no longer the
+    /// one in force. Recovery: read `get_authority_policy_version` and retry.
+    StalePolicyVersion = 327,
+    /// The proof cannot be acknowledged as activated (revoked, superseded,
+    /// disputed, expired, not delayed, or not yet active).
+    ActivationNotEligible = 328,
+    /// An activation acknowledgement already exists for this proof.
+    ActivationAlreadyAcknowledged = 329,
+    /// The caller is neither the proof's issuer nor an issuer-authorized
+    /// activator.
+    UnauthorizedActivator = 330,
+    /// The resolver is the issuer, a subject-authorized actor, or the evidence
+    /// submitter for this dispute, by address or by participant commitment.
+    ResolverConflictOfInterest = 331,
+    /// The resolver address is not registered with a participant commitment.
+    ResolverNotRegistered = 332,
+    /// The authority policy version must be greater than the current one.
+    InvalidPolicyVersion = 333,
+    /// A different participant commitment is already bound to this address.
+    ParticipantCommitmentLocked = 334,
 }
 
 /// Versioned asset identifier accepted by context-aware proof registration.

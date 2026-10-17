@@ -5,13 +5,16 @@
 
 #[allow(unused_imports)]
 use earnproof_shared::{
-    is_interface_compatible, ApprovalQuery, ApprovalStatus, ArchivedProofRecord, ContractError,
-    DisputeActorClass, DisputeFilingAnchor, DisputeFilingEligibility, DisputeFilingPolicy,
-    DisputeFilingStatus, DisputeRecord, DisputeStatus, GenesisRecord, InterfaceVersion,
-    MigrationStatus, PauseScope, ProofError, ProofPayloadRecord, ProofRecord,
-    ProofRegistrationInput, ProofStatus, ProofValidity, ProofValidityDetails, SchemaRateLimit,
-    SchemaRateLimitUsage, SubjectNullifier, TtlStatus, UpgradeApproval, UpgradeApprovalMetadata,
-    UpgradeApprovalRecord, UpgradeHistoryRecord, UpgradeReceipt, MAX_MIGRATION_BATCH,
+    default_participant_commitment, find_resolver_conflict, is_interface_compatible,
+    require_policy_version, revocation_authorization_domain, ActivationAcknowledgement,
+    ActivationActorRole, ActivationBlocker, ApprovalQuery, ApprovalStatus, ArchivedProofRecord,
+    ConflictRole, ContractError, DisputeActorClass, DisputeFilingAnchor, DisputeFilingEligibility,
+    DisputeFilingPolicy, DisputeFilingStatus, DisputeRecord, DisputeStatus, GenesisRecord,
+    InterfaceVersion, MigrationStatus, Participant, PauseScope, ProofError, ProofPayloadRecord,
+    ProofRecord, ProofRegistrationInput, ProofStatus, ProofValidity, ProofValidityDetails,
+    RevocationActorRole, RevocationAuthority, SchemaRateLimit, SchemaRateLimitUsage,
+    SubjectNullifier, TtlStatus, UpgradeApproval, UpgradeApprovalMetadata, UpgradeApprovalRecord,
+    UpgradeHistoryRecord, UpgradeReceipt, INITIAL_AUTHORITY_POLICY_VERSION, MAX_MIGRATION_BATCH,
     MAX_PROOF_BATCH_SIZE, MIGRATION_STATUS_VERSION, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
     UPGRADE_APPROVAL_EXPIRY_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
 };
@@ -44,6 +47,8 @@ pub trait ProtocolConfigInterface {
 pub trait IssuerRegistryInterface {
     fn is_active_address(env: Env, issuer_address: Address) -> bool;
     fn interface_version(env: Env) -> InterfaceVersion;
+    /// Stable issuer identifier for a current or former issuer address.
+    fn get_issuer_id_for_address(env: Env, address: Address) -> Option<BytesN<32>>;
 }
 
 #[contract]
@@ -117,6 +122,23 @@ enum DataKey {
     PauseAcknowledgementCount,
     /// Versioned, opaque subject-nullifier commitment bound to one proof.
     SubjectNullifier(BytesN<32>),
+    /// Authority and delegation policy version in force (instance storage).
+    /// Unset means [`INITIAL_AUTHORITY_POLICY_VERSION`].
+    AuthorityPolicyVersion,
+    /// Immutable revocation authority evidence, keyed by proof.
+    RevocationAuthority(BytesN<32>),
+    /// Immutable activation acknowledgement, keyed by proof.
+    ActivationAck(BytesN<32>),
+    /// Registry-wide count of activation acknowledgements.
+    ActivationAckCount,
+    /// `(issuer, delegate)` pair authorized to acknowledge activations.
+    ActivationDelegate(Address, Address),
+    /// Registered dispute resolver and its participant commitment.
+    DisputeResolver(Address),
+    /// Participant commitment bound to an address. Write-once per address.
+    ParticipantCommitment(Address),
+    /// `(proof, commitment)` pair for a subject-authorized actor.
+    SubjectActor(BytesN<32>, BytesN<32>),
 }
 
 #[contractevent]
@@ -232,6 +254,9 @@ pub struct ProofRegisteredInBatch {
 pub struct ProofRevokedInBatch {
     pub proof_id_hash: BytesN<32>,
     pub revoked_by: Address,
+    pub policy_version: u32,
+    pub actor_role: RevocationActorRole,
+    pub authorization_domain: BytesN<32>,
 }
 
 // ── dispute events ───────────────────────────────────────────────────────────
@@ -309,6 +334,31 @@ pub struct ProofRevoked {
     pub revoked_ledger: u32,
     pub by_admin: bool,
     pub epoch: u32,
+    /// Authority policy version that authorized this revocation.
+    pub policy_version: u32,
+    pub actor_role: RevocationActorRole,
+    pub authorization_domain: BytesN<32>,
+}
+
+/// Emitted when governance raises the authority policy version. Revocations
+/// already recorded keep the version they committed.
+#[contractevent]
+pub struct AuthorityPolicyVersionChanged {
+    pub previous_version: u32,
+    pub new_version: u32,
+    pub changed_by: Address,
+}
+
+/// Emitted once when an issuer or authorized activator acknowledges that a
+/// delayed proof became eligible.
+#[contractevent]
+pub struct ProofActivationAcknowledged {
+    pub proof_id_hash: BytesN<32>,
+    pub acknowledged_by: Address,
+    pub actor_role: ActivationActorRole,
+    pub ledger: u32,
+    pub timestamp: u64,
+    pub sequence: u64,
 }
 
 #[contractimpl]
@@ -1271,11 +1321,358 @@ impl ProofRegistryContract {
     }
 
     pub fn revoke_proof(env: Env, proof_id_hash: BytesN<32>) -> Result<(), ProofError> {
-        Self::set_revoked(env, proof_id_hash, false)
+        Self::set_revoked(env, proof_id_hash, false, None)
     }
 
     pub fn admin_revoke_proof(env: Env, proof_id_hash: BytesN<32>) -> Result<(), ProofError> {
-        Self::set_revoked(env, proof_id_hash, true)
+        Self::set_revoked(env, proof_id_hash, true, None)
+    }
+
+    // ── revocation authority binding ──────────────────────────────────────────
+
+    /// Authority and delegation policy version currently in force. A
+    /// deployment that never set one reports version 1.
+    pub fn get_authority_policy_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AuthorityPolicyVersion)
+            .unwrap_or(INITIAL_AUTHORITY_POLICY_VERSION)
+    }
+
+    /// Admin-only: raises the authority policy version. The version must be
+    /// strictly greater than the current one, so a replayed or reordered
+    /// governance transaction fails with [`ProofError::InvalidPolicyVersion`].
+    /// Revocations recorded earlier are untouched.
+    pub fn set_authority_policy_version(env: Env, new_version: u32) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let admin = Self::get_admin(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        Self::require_auth(&admin);
+        let previous = Self::get_authority_policy_version(env.clone());
+        if !earnproof_shared::next_policy_version_is_valid(previous, new_version) {
+            return Err(ProofError::InvalidPolicyVersion);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthorityPolicyVersion, &new_version);
+        AuthorityPolicyVersionChanged {
+            previous_version: previous,
+            new_version,
+            changed_by: admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Returns the immutable authority evidence recorded when the proof was
+    /// revoked. Proofs revoked before this record existed have none and
+    /// return [`ProofError::ProofNotFound`].
+    pub fn get_revocation_authority(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+    ) -> Result<RevocationAuthority, ProofError> {
+        let key = DataKey::RevocationAuthority(proof_id_hash);
+        let record = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ProofError::ProofNotFound)?;
+        Self::extend_proof_key_ttl(env, &key);
+        Ok(record)
+    }
+
+    /// Issuer revocation pinned to the policy version the caller reviewed.
+    /// Fails with [`ProofError::StalePolicyVersion`] if the version changed.
+    pub fn revoke_proof_at_policy(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        expected_policy_version: u32,
+    ) -> Result<(), ProofError> {
+        Self::set_revoked(env, proof_id_hash, false, Some(expected_policy_version))
+    }
+
+    /// Admin revocation pinned to the policy version the caller reviewed.
+    pub fn admin_revoke_proof_at_policy(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        expected_policy_version: u32,
+    ) -> Result<(), ProofError> {
+        Self::set_revoked(env, proof_id_hash, true, Some(expected_policy_version))
+    }
+
+    // ── activation acknowledgements ───────────────────────────────────────────
+
+    /// Issuer-only: authorizes or revokes `delegate` as an activator for the
+    /// issuer's own proofs. The grant is scoped to this issuer.
+    pub fn set_activation_delegate(
+        env: Env,
+        issuer: Address,
+        delegate: Address,
+        enabled: bool,
+    ) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        Self::require_valid_issuer_address(&issuer)?;
+        Self::require_valid_issuer_address(&delegate)?;
+        Self::require_auth(&issuer);
+        let key = DataKey::ActivationDelegate(issuer, delegate);
+        if enabled {
+            env.storage().persistent().set(&key, &true);
+            Self::extend_proof_key_ttl(env, &key);
+        } else {
+            env.storage().persistent().remove(&key);
+        }
+        Ok(())
+    }
+
+    pub fn is_activation_delegate(env: Env, issuer: Address, delegate: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::ActivationDelegate(issuer, delegate))
+    }
+
+    /// Why the proof cannot be acknowledged right now, or `None` if it can.
+    pub fn get_activation_blocker(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+    ) -> Result<Option<ActivationBlocker>, ProofError> {
+        let proof: ProofRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proof(proof_id_hash.clone()))
+            .ok_or(ProofError::ProofNotFound)?;
+        Ok(Self::activation_blocker_for(&env, &proof))
+    }
+
+    /// Records that a delayed proof became eligible for verification.
+    ///
+    /// `activator` must authorize the call and be the proof's issuer or an
+    /// address that issuer authorized. Check order is fixed: unknown proof,
+    /// pause, authorization, replay, then eligibility. An acknowledgement is
+    /// written once and never changes; a second attempt, including one in the
+    /// same ledger, fails with [`ProofError::ActivationAlreadyAcknowledged`].
+    /// It never changes proof validity.
+    pub fn acknowledge_activation(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        activator: Address,
+    ) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let proof: ProofRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proof(proof_id_hash.clone()))
+            .ok_or(ProofError::ProofNotFound)?;
+        if let Ok(protocol_config) = Self::get_protocol_config(env.clone()) {
+            if ProtocolConfigContractClient::new(&env, &protocol_config).is_paused() {
+                return Err(ProofError::ContractPaused);
+            }
+        }
+        Self::require_auth(&activator);
+        let actor_role = if activator == proof.issuer_address {
+            ActivationActorRole::Issuer
+        } else if Self::is_activation_delegate(
+            env.clone(),
+            proof.issuer_address.clone(),
+            activator.clone(),
+        ) {
+            ActivationActorRole::Delegate
+        } else {
+            return Err(ProofError::UnauthorizedActivator);
+        };
+
+        let key = DataKey::ActivationAck(proof_id_hash.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(ProofError::ActivationAlreadyAcknowledged);
+        }
+        if Self::activation_blocker_for(&env, &proof).is_some() {
+            return Err(ProofError::ActivationNotEligible);
+        }
+
+        let count_key = DataKey::ActivationAckCount;
+        let sequence: u64 = env
+            .storage()
+            .instance()
+            .get::<_, u64>(&count_key)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(ProofError::ProofCountOverflow)?;
+        env.storage().instance().set(&count_key, &sequence);
+
+        let ledger = env.ledger().sequence();
+        let timestamp = env.ledger().timestamp();
+        let record = ActivationAcknowledgement {
+            proof_id_hash: proof_id_hash.clone(),
+            acknowledged_by: activator.clone(),
+            actor_role,
+            ledger,
+            timestamp,
+            sequence,
+            activates_at: proof.activates_at,
+        };
+        env.storage().persistent().set(&key, &record);
+        Self::extend_proof_key_ttl(env.clone(), &key);
+        ProofActivationAcknowledged {
+            proof_id_hash,
+            acknowledged_by: activator,
+            actor_role,
+            ledger,
+            timestamp,
+            sequence,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    pub fn get_activation_acknowledgement(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+    ) -> Result<ActivationAcknowledgement, ProofError> {
+        let key = DataKey::ActivationAck(proof_id_hash);
+        let record = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ProofError::ProofNotFound)?;
+        Self::extend_proof_key_ttl(env, &key);
+        Ok(record)
+    }
+
+    // ── dispute resolver conflicts of interest ────────────────────────────────
+
+    /// Admin-only: registers `resolver` with a stable participant commitment.
+    /// Re-registering the same address replaces its commitment. A new address
+    /// for the same resolver must carry the same commitment, which is what
+    /// keeps the conflict check intact across address rotation.
+    pub fn register_dispute_resolver(
+        env: Env,
+        resolver: Address,
+        commitment: BytesN<32>,
+    ) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        Self::require_valid_issuer_address(&resolver)?;
+        if commitment == BytesN::from_array(&env, &[0; 32]) {
+            return Err(ProofError::MalformedInput);
+        }
+        let admin = Self::get_admin(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        Self::require_auth(&admin);
+        let key = DataKey::DisputeResolver(resolver);
+        env.storage().persistent().set(&key, &commitment);
+        Self::extend_proof_key_ttl(env, &key);
+        Ok(())
+    }
+
+    /// Admin-only: removes a registered resolver.
+    pub fn remove_dispute_resolver(env: Env, resolver: Address) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let admin = Self::get_admin(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
+        Self::require_auth(&admin);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::DisputeResolver(resolver));
+        Ok(())
+    }
+
+    pub fn get_dispute_resolver_commitment(env: Env, resolver: Address) -> Option<BytesN<32>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::DisputeResolver(resolver))
+    }
+
+    /// Binds a stable commitment to the caller's own address. Write-once: the
+    /// same value is accepted again, a different value fails with
+    /// [`ProofError::ParticipantCommitmentLocked`], so a participant cannot
+    /// re-label itself after a dispute starts.
+    pub fn bind_participant_commitment(
+        env: Env,
+        participant: Address,
+        commitment: BytesN<32>,
+    ) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        Self::require_valid_issuer_address(&participant)?;
+        if commitment == BytesN::from_array(&env, &[0; 32]) {
+            return Err(ProofError::MalformedInput);
+        }
+        Self::require_auth(&participant);
+        let key = DataKey::ParticipantCommitment(participant);
+        if let Some(existing) = env.storage().persistent().get::<_, BytesN<32>>(&key) {
+            return if existing == commitment {
+                Ok(())
+            } else {
+                Err(ProofError::ParticipantCommitmentLocked)
+            };
+        }
+        env.storage().persistent().set(&key, &commitment);
+        Self::extend_proof_key_ttl(env, &key);
+        Ok(())
+    }
+
+    /// Issuer-only: marks `actor` as a subject-authorized actor for the
+    /// proof, so the actor, and anyone sharing its commitment, can never
+    /// resolve a dispute on it.
+    pub fn authorize_subject_actor(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        actor: Address,
+    ) -> Result<(), ProofError> {
+        Self::ensure_not_decommissioned(&env)?;
+        Self::require_valid_issuer_address(&actor)?;
+        let proof: ProofRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proof(proof_id_hash.clone()))
+            .ok_or(ProofError::ProofNotFound)?;
+        Self::require_auth(&proof.issuer_address);
+        let commitment = Self::participant_commitment(&env, &actor);
+        let key = DataKey::SubjectActor(proof_id_hash, commitment);
+        env.storage().persistent().set(&key, &true);
+        Self::extend_proof_key_ttl(env, &key);
+        Ok(())
+    }
+
+    /// Read-only conflict check for a dispute. Returns the first conflicting
+    /// role, or `None` when `resolver` may decide the dispute.
+    pub fn get_resolver_conflict(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        resolver: Address,
+    ) -> Result<Option<ConflictRole>, ProofError> {
+        let proof: ProofRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proof(proof_id_hash.clone()))
+            .ok_or(ProofError::ProofNotFound)?;
+        let dispute =
+            Self::read_dispute(&env, &proof_id_hash).ok_or(ProofError::DisputeNotFound)?;
+        Ok(Self::resolver_conflict(&env, &resolver, &proof, &dispute))
+    }
+
+    /// Resolves an open dispute as a registered resolver instead of the admin.
+    /// Fails with [`ProofError::ResolverNotRegistered`] for an unregistered
+    /// address and [`ProofError::ResolverConflictOfInterest`] on a conflict.
+    pub fn resolve_dispute_as(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        resolver: Address,
+    ) -> Result<(), ProofError> {
+        Self::transition_dispute(
+            env,
+            proof_id_hash,
+            DisputeTransition::Resolve,
+            Some(resolver),
+        )
+    }
+
+    /// Rejects an open dispute as a registered resolver instead of the admin.
+    pub fn reject_dispute_as(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        resolver: Address,
+    ) -> Result<(), ProofError> {
+        Self::transition_dispute(
+            env,
+            proof_id_hash,
+            DisputeTransition::Reject,
+            Some(resolver),
+        )
     }
 
     /// Revokes a strictly bounded batch of proofs, atomically, authorizing
@@ -1612,17 +2009,17 @@ impl ProofRegistryContract {
     /// withdraw it — not the admin, and not the proof's issuer unless the
     /// issuer is the one who opened it.
     pub fn withdraw_dispute(env: Env, proof_id_hash: BytesN<32>) -> Result<(), ProofError> {
-        Self::transition_dispute(env, proof_id_hash, DisputeTransition::Withdraw)
+        Self::transition_dispute(env, proof_id_hash, DisputeTransition::Withdraw, None)
     }
 
     /// Admin-only: resolves an open dispute in the disputant's favor.
     pub fn resolve_dispute(env: Env, proof_id_hash: BytesN<32>) -> Result<(), ProofError> {
-        Self::transition_dispute(env, proof_id_hash, DisputeTransition::Resolve)
+        Self::transition_dispute(env, proof_id_hash, DisputeTransition::Resolve, None)
     }
 
     /// Admin-only: rejects an open dispute as without merit.
     pub fn reject_dispute(env: Env, proof_id_hash: BytesN<32>) -> Result<(), ProofError> {
-        Self::transition_dispute(env, proof_id_hash, DisputeTransition::Reject)
+        Self::transition_dispute(env, proof_id_hash, DisputeTransition::Reject, None)
     }
 
     /// Returns the current dispute record for a proof, if one exists.
@@ -2606,7 +3003,12 @@ impl ProofRegistryContract {
         Ok(())
     }
 
-    fn set_revoked(env: Env, proof_id_hash: BytesN<32>, by_admin: bool) -> Result<(), ProofError> {
+    fn set_revoked(
+        env: Env,
+        proof_id_hash: BytesN<32>,
+        by_admin: bool,
+        expected_policy_version: Option<u32>,
+    ) -> Result<(), ProofError> {
         Self::assert_operational(&env);
         Self::ensure_not_decommissioned(&env)?;
         if let Ok(protocol_config) = Self::get_protocol_config(env.clone()) {
@@ -2622,15 +3024,24 @@ impl ProofRegistryContract {
             .get(&key)
             .ok_or(ProofError::ProofNotFound)?;
 
-        if by_admin {
+        let actor = if by_admin {
             let admin = Self::get_admin(env.clone()).map_err(|_| ProofError::ProofNotFound)?;
             Self::require_auth(&admin);
+            admin
         } else {
             Self::require_auth(&record.issuer_address);
-        }
+            record.issuer_address.clone()
+        };
 
         if record.status == ProofStatus::Revoked {
             return Err(ProofError::ProofAlreadyRevoked);
+        }
+
+        // Check order is fixed: not found, authorization, already revoked,
+        // then a stale pinned policy version.
+        let policy_version = Self::get_authority_policy_version(env.clone());
+        if let Some(expected) = expected_policy_version {
+            require_policy_version(expected, policy_version)?;
         }
 
         record.status = ProofStatus::Revoked;
@@ -2645,6 +3056,13 @@ impl ProofRegistryContract {
             .set(&active_key, &active.saturating_sub(1));
         env.storage().persistent().set(&key, &record);
         Self::extend_proof_key_ttl(env.clone(), &key);
+        let role = if by_admin {
+            RevocationActorRole::Admin
+        } else {
+            RevocationActorRole::Issuer
+        };
+        let authorization_domain =
+            Self::record_revocation_authority(&env, &proof_id_hash, &actor, role, policy_version);
         let epoch = Self::bump_registry_epoch(&env);
         ProofRevoked {
             proof_id_hash,
@@ -2652,6 +3070,9 @@ impl ProofRegistryContract {
             revoked_ledger,
             by_admin,
             epoch,
+            policy_version,
+            actor_role: role,
+            authorization_domain,
         }
         .publish(&env);
         Ok(())
@@ -2720,6 +3141,12 @@ impl ProofRegistryContract {
         };
 
         let now = env.ledger().timestamp();
+        let policy_version = Self::get_authority_policy_version(env.clone());
+        let role = if by_admin {
+            RevocationActorRole::Admin
+        } else {
+            RevocationActorRole::Issuer
+        };
 
         for proof_id_hash in proof_id_hashes.iter() {
             let key = DataKey::Proof(proof_id_hash.clone());
@@ -2755,9 +3182,20 @@ impl ProofRegistryContract {
                 TTL_EXTEND_TO_LEDGERS,
             );
 
+            let authorization_domain = Self::record_revocation_authority_batched(
+                &env,
+                &proof_id_hash,
+                &revoked_by,
+                role,
+                policy_version,
+            );
+
             ProofRevokedInBatch {
                 proof_id_hash: proof_id_hash.clone(),
                 revoked_by,
+                policy_version,
+                actor_role: role,
+                authorization_domain,
             }
             .publish(&env);
         }
@@ -2853,6 +3291,7 @@ impl ProofRegistryContract {
         env: Env,
         proof_id_hash: BytesN<32>,
         transition: DisputeTransition,
+        resolver: Option<Address>,
     ) -> Result<(), ProofError> {
         Self::ensure_not_decommissioned(&env)?;
         if let Ok(protocol_config) = Self::get_protocol_config(env.clone()) {
@@ -2879,18 +3318,14 @@ impl ProofRegistryContract {
                 Self::require_auth(&opener);
                 (opener, DisputeStatus::Withdrawn)
             }
-            DisputeTransition::Resolve => {
-                let admin =
-                    Self::get_admin(env.clone()).map_err(|_| ProofError::DisputeNotFound)?;
-                Self::require_auth(&admin);
-                (admin, DisputeStatus::Resolved)
-            }
-            DisputeTransition::Reject => {
-                let admin =
-                    Self::get_admin(env.clone()).map_err(|_| ProofError::DisputeNotFound)?;
-                Self::require_auth(&admin);
-                (admin, DisputeStatus::Rejected)
-            }
+            DisputeTransition::Resolve => (
+                Self::dispute_decider(&env, &resolver)?,
+                DisputeStatus::Resolved,
+            ),
+            DisputeTransition::Reject => (
+                Self::dispute_decider(&env, &resolver)?,
+                DisputeStatus::Rejected,
+            ),
         };
 
         let proof_key = DataKey::Proof(proof_id_hash.clone());
@@ -2900,6 +3335,20 @@ impl ProofRegistryContract {
             .get(&proof_key)
             .ok_or(ProofError::ProofNotFound)?;
         let actor_class = Self::classify_actor(&env, &actor, &proof.issuer_address);
+
+        if !matches!(transition, DisputeTransition::Withdraw) {
+            if resolver.is_some()
+                && !env
+                    .storage()
+                    .persistent()
+                    .has(&DataKey::DisputeResolver(actor.clone()))
+            {
+                return Err(ProofError::ResolverNotRegistered);
+            }
+            if Self::resolver_conflict(&env, &actor, &proof, &record).is_some() {
+                return Err(ProofError::ResolverConflictOfInterest);
+            }
+        }
 
         let now = env.ledger().timestamp();
         record.status = new_status;
@@ -2936,6 +3385,173 @@ impl ProofRegistryContract {
         Ok(())
     }
 
+    /// Address that decides a dispute: the supplied registered resolver, or
+    /// the admin when none is supplied. Authorization is required either way.
+    fn dispute_decider(env: &Env, resolver: &Option<Address>) -> Result<Address, ProofError> {
+        let decider = match resolver {
+            Some(resolver) => resolver.clone(),
+            None => Self::get_admin(env.clone()).map_err(|_| ProofError::DisputeNotFound)?,
+        };
+        Self::require_auth(&decider);
+        Ok(decider)
+    }
+
+    fn participant_commitment(env: &Env, address: &Address) -> BytesN<32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ParticipantCommitment(address.clone()))
+            .unwrap_or_else(|| default_participant_commitment(env, address))
+    }
+
+    /// Stable issuer identifier for an address, if issuer-registry knows it,
+    /// including addresses an issuer has since rotated away from. A registry
+    /// that cannot answer is treated as having no identifier.
+    fn issuer_id_of(env: &Env, address: &Address) -> Option<BytesN<32>> {
+        let registry = Self::get_issuer_registry(env.clone()).ok()?;
+        match IssuerRegistryContractClient::new(env, &registry)
+            .try_get_issuer_id_for_address(address)
+        {
+            Ok(Ok(id)) => id,
+            _ => None,
+        }
+    }
+
+    fn issuer_commitment(env: &Env, issuer: &Address) -> BytesN<32> {
+        Self::issuer_id_of(env, issuer).unwrap_or_else(|| Self::participant_commitment(env, issuer))
+    }
+
+    /// First conflict between `resolver` and the parties to this dispute. The
+    /// resolver is compared by address and by every commitment it carries
+    /// (registered, bound, default, and issuer identifier), so rotating to a
+    /// new address with the same commitment does not clear a conflict.
+    fn resolver_conflict(
+        env: &Env,
+        resolver: &Address,
+        proof: &ProofRecord,
+        dispute: &DisputeRecord,
+    ) -> Option<ConflictRole> {
+        let mut commitments = soroban_sdk::vec![
+            env,
+            default_participant_commitment(env, resolver),
+            Self::participant_commitment(env, resolver)
+        ];
+        if let Some(registered) = env
+            .storage()
+            .persistent()
+            .get::<_, BytesN<32>>(&DataKey::DisputeResolver(resolver.clone()))
+        {
+            commitments.push_back(registered);
+        }
+        if let Some(issuer_id) = Self::issuer_id_of(env, resolver) {
+            commitments.push_back(issuer_id);
+        }
+        let participants = [
+            Participant {
+                role: ConflictRole::Issuer,
+                address: proof.issuer_address.clone(),
+                commitment: Self::issuer_commitment(env, &proof.issuer_address),
+            },
+            Participant {
+                role: ConflictRole::EvidenceSubmitter,
+                address: dispute.opened_by.clone(),
+                commitment: Self::participant_commitment(env, &dispute.opened_by),
+            },
+        ];
+        for commitment in commitments.iter() {
+            if let Some(role) = find_resolver_conflict(resolver, &commitment, &participants) {
+                return Some(role);
+            }
+            if env.storage().persistent().has(&DataKey::SubjectActor(
+                proof.proof_id_hash.clone(),
+                commitment,
+            )) {
+                return Some(ConflictRole::SubjectAuthorizedActor);
+            }
+        }
+        None
+    }
+
+    fn activation_blocker_for(env: &Env, proof: &ProofRecord) -> Option<ActivationBlocker> {
+        let dispute = Self::read_dispute(env, &proof.proof_id_hash).map(|d| d.status);
+        let has_successor = env
+            .storage()
+            .persistent()
+            .get::<_, soroban_sdk::Vec<BytesN<32>>>(&DataKey::Successors(
+                proof.proof_id_hash.clone(),
+            ))
+            .is_some_and(|successors| !successors.is_empty());
+        earnproof_shared::activation_blocker(
+            env.ledger().timestamp(),
+            &proof.status,
+            proof.activates_at,
+            proof.expires_at,
+            dispute,
+            has_successor,
+        )
+    }
+
+    /// Writes the immutable authority evidence for one revocation and returns
+    /// its authorization domain.
+    fn record_revocation_authority(
+        env: &Env,
+        proof_id_hash: &BytesN<32>,
+        actor: &Address,
+        role: RevocationActorRole,
+        policy_version: u32,
+    ) -> BytesN<32> {
+        let key = DataKey::RevocationAuthority(proof_id_hash.clone());
+        let domain =
+            Self::write_revocation_authority(env, proof_id_hash, actor, role, policy_version);
+        Self::extend_proof_key_ttl(env.clone(), &key);
+        domain
+    }
+
+    /// Batch variant: a plain TTL bump, like the proof entry itself.
+    fn record_revocation_authority_batched(
+        env: &Env,
+        proof_id_hash: &BytesN<32>,
+        actor: &Address,
+        role: RevocationActorRole,
+        policy_version: u32,
+    ) -> BytesN<32> {
+        let key = DataKey::RevocationAuthority(proof_id_hash.clone());
+        let domain =
+            Self::write_revocation_authority(env, proof_id_hash, actor, role, policy_version);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
+        domain
+    }
+
+    fn write_revocation_authority(
+        env: &Env,
+        proof_id_hash: &BytesN<32>,
+        actor: &Address,
+        role: RevocationActorRole,
+        policy_version: u32,
+    ) -> BytesN<32> {
+        let domain = revocation_authorization_domain(
+            env,
+            &env.current_contract_address(),
+            role,
+            policy_version,
+        );
+        let record = RevocationAuthority {
+            proof_id_hash: proof_id_hash.clone(),
+            policy_version,
+            actor_role: role,
+            actor: actor.clone(),
+            authorization_domain: domain.clone(),
+            revoked_at: env.ledger().timestamp(),
+            revoked_ledger: env.ledger().sequence(),
+        };
+        env.storage().persistent().set(
+            &DataKey::RevocationAuthority(proof_id_hash.clone()),
+            &record,
+        );
+        domain
+    }
+
     fn bump_registry_epoch(env: &Env) -> u32 {
         let current = Self::get_registry_epoch(env.clone());
         let next = current
@@ -2963,10 +3579,8 @@ mod test {
     use super::{DataKey, ProofRegistryContract, ProofRegistryContractClient};
     use earnproof_shared::{
         AdminTransferState, ContractError, DisputeActorClass, DisputeStatus, PauseScope,
-        ProofError, ProofRecord, ProofStatus, ProofValidity, ADMIN_TRANSFER_EXPIRY_LEDGERS,
-        MAX_PROOF_BATCH_SIZE, TTL_THRESHOLD_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
-        DisputeActorClass, DisputeStatus, PauseScope, ProofError, ProofRecord, ProofStatus,
-        ProofValidity, SubjectNullifier, MAX_PROOF_BATCH_SIZE, TTL_THRESHOLD_LEDGERS,
+        ProofError, ProofRecord, ProofStatus, ProofValidity, SubjectNullifier,
+        ADMIN_TRANSFER_EXPIRY_LEDGERS, MAX_PROOF_BATCH_SIZE, TTL_THRESHOLD_LEDGERS,
         UPGRADE_TIMELOCK_LEDGERS,
     };
     use issuer_registry::{IssuerRegistryContract, IssuerRegistryContractClient};

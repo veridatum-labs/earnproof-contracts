@@ -87,7 +87,9 @@ documented `0` sentinel.
 | Topic | Emitted by | Payload |
 |---|---|---|
 | `proof_registered` | `register_proof` | `proof_id_hash`, `issuer_address`, `schema_version`, `created_ledger`, `created_at`, `expires_at`, `epoch` |
-| `proof_revoked` | `revoke_proof`, `admin_revoke_proof` | `proof_id_hash`, `revoked_at`, `revoked_ledger`, `by_admin`, `epoch` |
+| `proof_revoked` | `revoke_proof`, `admin_revoke_proof`, `revoke_proof_at_policy`, `admin_revoke_proof_at_policy` | `proof_id_hash`, `revoked_at`, `revoked_ledger`, `by_admin`, `epoch`, `policy_version`, `actor_role`, `authorization_domain` |
+| `authority_policy_version_changed` | `set_authority_policy_version` | `previous_version`, `new_version`, `changed_by` |
+| `proof_activation_acknowledged` | `acknowledge_activation` | `proof_id_hash`, `acknowledged_by`, `actor_role`, `ledger`, `timestamp`, `sequence` |
 | `pause_acknowledged` | `acknowledge_pause` | `record` |
 | `pause_acknowledger_changed` | `set_pause_acknowledger` | `address`, `enabled`, `changed_by` |
 

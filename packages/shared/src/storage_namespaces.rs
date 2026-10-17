@@ -49,7 +49,7 @@ pub const CONTRACTS: [&str; 3] = ["issuer-registry", "proof-registry", "protocol
 /// Adding a row here is the second half of adding a storage key; the first is
 /// adding the `DataKey` variant. Doing one without the other fails the tests in
 /// `tests/storage-keys/`.
-pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
+pub const STORAGE_NAMESPACES: [StorageNamespace; 109] = [
     StorageNamespace {
         contract: "issuer-registry",
         namespace: "ActiveIssuerCount",
@@ -128,6 +128,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         arity: 0,
         class: StorageClass::Instance,
         value: "bool",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
+        namespace: "FormerAddressIssuer",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "BytesN<32>",
         owner: "registry operator",
     },
     StorageNamespace {
@@ -288,6 +296,10 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         arity: 2,
         class: StorageClass::Persistent,
         value: "SigningKeyLifecycleRecord",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
         namespace: "SigningKeyHistory",
         arity: 2,
         class: StorageClass::Persistent,
@@ -308,10 +320,18 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         arity: 1,
         class: StorageClass::Persistent,
         value: "u64",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
         namespace: "SigningKeyHistoryCount",
         arity: 1,
         class: StorageClass::Persistent,
         value: "u32",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "issuer-registry",
         namespace: "RevocationTombstone",
         arity: 1,
         class: StorageClass::Persistent,
@@ -325,6 +345,30 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         class: StorageClass::Instance,
         value: "Address",
         owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ActivationAck",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "ActivationAcknowledgement",
+        owner: "issuing party",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ActivationAckCount",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u64",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ActivationDelegate",
+        arity: 2,
+        class: StorageClass::Persistent,
+        value: "bool",
+        owner: "issuing party",
     },
     StorageNamespace {
         contract: "proof-registry",
@@ -352,6 +396,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
     },
     StorageNamespace {
         contract: "proof-registry",
+        namespace: "AuthorityPolicyVersion",
+        arity: 0,
+        class: StorageClass::Instance,
+        value: "u32",
+        owner: "registry operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
         namespace: "ContractVersion",
         arity: 0,
         class: StorageClass::Instance,
@@ -373,6 +425,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         class: StorageClass::Persistent,
         value: "DisputeRecord",
         owner: "disputing party",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "DisputeResolver",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "BytesN<32>",
+        owner: "registry operator",
     },
     StorageNamespace {
         contract: "proof-registry",
@@ -421,6 +481,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         class: StorageClass::Instance,
         value: "MigrationStatus",
         owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "ParticipantCommitment",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "BytesN<32>",
+        owner: "issuing party",
     },
     StorageNamespace {
         contract: "proof-registry",
@@ -520,6 +588,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
     },
     StorageNamespace {
         contract: "proof-registry",
+        namespace: "RevocationAuthority",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "RevocationAuthority",
+        owner: "issuing party",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
         namespace: "SchemaRateUsage",
         arity: 2,
         class: StorageClass::Persistent,
@@ -533,6 +609,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         class: StorageClass::Persistent,
         value: "bool",
         owner: "deployment operator",
+    },
+    StorageNamespace {
+        contract: "proof-registry",
+        namespace: "SubjectActor",
+        arity: 2,
+        class: StorageClass::Persistent,
+        value: "bool",
+        owner: "issuing party",
     },
     StorageNamespace {
         contract: "proof-registry",
@@ -640,6 +724,14 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
     },
     StorageNamespace {
         contract: "protocol-config",
+        namespace: "HashAlgorithm",
+        arity: 1,
+        class: StorageClass::Persistent,
+        value: "HashAlgorithmRecord",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
         namespace: "MigrationStatus",
         arity: 0,
         class: StorageClass::Instance,
@@ -652,6 +744,10 @@ pub const STORAGE_NAMESPACES: [StorageNamespace; 66] = [
         arity: 0,
         class: StorageClass::Instance,
         value: "u64",
+        owner: "protocol operator",
+    },
+    StorageNamespace {
+        contract: "protocol-config",
         namespace: "PauseAcknowledgementCount",
         arity: 0,
         class: StorageClass::Instance,

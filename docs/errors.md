@@ -21,11 +21,11 @@ Backend mapping guidance, including how to handle a code this document does not 
 | Range | Domain | Enum |
 |---|---|---|
 | 1-99 | common | `ContractError` |
-| 100-199 | protocol-config | none yet; reserved |
+| 100-199 | protocol-config | `ProtocolConfigError` |
 | 200-299 | issuer-registry | `IssuerError` |
 | 300-399 | proof-registry | `ProofError` |
 
-The protocol-config range is allocated but empty: that contract returns common errors only. The range stays reserved so a future protocol-config error cannot collide with anything.
+The protocol-config range holds the commitment hash algorithm registry errors (100-105). Every other protocol-config failure still returns a common error.
 
 **Status** distinguishes a code that some contract path actually returns from one that is declared and reserved but produced by nothing in this release. Eight codes are currently reserved, and the distinction matters in practice: see the ambiguity note below before writing a client that waits for one of them.
 
@@ -101,6 +101,12 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 97 | `ApprovalProposalExpired` | `ContractError` | common | returned | after-operator-action | 409 |
 | 98 | `InsufficientApprovals` | `ContractError` | common | returned | after-operator-action | 403 |
 | 99 | `InvalidApprovalPolicy` | `ContractError` | common | returned | after-caller-change | 400 |
+| 100 | `HashAlgorithmNotFound` | `ProtocolConfigError` | protocol-config | returned | after-caller-change | 404 |
+| 101 | `InvalidHashAlgorithmTransition` | `ProtocolConfigError` | protocol-config | returned | never | 409 |
+| 102 | `HashAlgorithmDeprecated` | `ProtocolConfigError` | protocol-config | returned | after-caller-change | 400 |
+| 103 | `InvalidHashAlgorithmId` | `ProtocolConfigError` | protocol-config | returned | after-caller-change | 400 |
+| 104 | `HashAlgorithmNotActive` | `ProtocolConfigError` | protocol-config | returned | after-operator-action | 409 |
+| 105 | `RegistryUnavailable` | `ProtocolConfigError` | protocol-config | returned | after-operator-action | 503 |
 | 200 | `IssuerAlreadyRegistered` | `IssuerError` | issuer-registry | returned | never | 409 |
 | 201 | `IssuerNotFound` | `IssuerError` | issuer-registry | returned | after-caller-change | 404 |
 | 202 | `IssuerAddressAlreadyRegistered` | `IssuerError` | issuer-registry | returned | never | 409 |
@@ -141,6 +147,14 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 324 | `TooManySuccessors` | `ProofError` | proof-registry | returned | never | 400 |
 | 325 | `DisputeFilingWindowClosed` | `ProofError` | proof-registry | returned | never | 400 |
 | 326 | `UnsupportedNullifierDomain` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 327 | `StalePolicyVersion` | `ProofError` | proof-registry | returned | after-caller-change | 409 |
+| 328 | `ActivationNotEligible` | `ProofError` | proof-registry | returned | never | 409 |
+| 329 | `ActivationAlreadyAcknowledged` | `ProofError` | proof-registry | returned | never | 409 |
+| 330 | `UnauthorizedActivator` | `ProofError` | proof-registry | returned | after-caller-change | 403 |
+| 331 | `ResolverConflictOfInterest` | `ProofError` | proof-registry | returned | never | 403 |
+| 332 | `ResolverNotRegistered` | `ProofError` | proof-registry | returned | after-operator-action | 403 |
+| 333 | `InvalidPolicyVersion` | `ProofError` | proof-registry | returned | after-caller-change | 400 |
+| 334 | `ParticipantCommitmentLocked` | `ProofError` | proof-registry | returned | never | 409 |
 
 ## Details
 ### 1 - `AlreadyInitialized`
@@ -384,6 +398,72 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Remediation: Configure a non-empty unique signer set with a threshold between one and the signer count.
 - Suggested HTTP status: 400
 - Client message: "Invalid approval policy"
+
+### 100 - `HashAlgorithmNotFound`
+
+- Enum: `ProtocolConfigError`
+- Domain: protocol-config
+- Status: returned
+- Retry: after-caller-change
+- Cause: No commitment hash algorithm is registered under the supplied identifier.
+- Remediation: Use an identifier returned by the algorithm registry, or ask governance to approve it first.
+- Suggested HTTP status: 404
+- Client message: "Hash algorithm not found"
+
+### 101 - `InvalidHashAlgorithmTransition`
+
+- Enum: `ProtocolConfigError`
+- Domain: protocol-config
+- Status: returned
+- Retry: never
+- Cause: The lifecycle step is not allowed from the algorithm current status, or the identifier is already registered.
+- Remediation: Read the algorithm record and request only the next valid step: approve, then activate, then deprecate.
+- Suggested HTTP status: 409
+- Client message: "Invalid hash algorithm transition"
+
+### 102 - `HashAlgorithmDeprecated`
+
+- Enum: `ProtocolConfigError`
+- Domain: protocol-config
+- Status: returned
+- Retry: after-caller-change
+- Cause: A new commitment was requested with a deprecated hash algorithm. Deprecated algorithms stay verifiable but cannot create commitments.
+- Remediation: Create the commitment with an active algorithm. Verification of existing commitments is unaffected.
+- Suggested HTTP status: 400
+- Client message: "Hash algorithm is deprecated"
+
+### 103 - `InvalidHashAlgorithmId`
+
+- Enum: `ProtocolConfigError`
+- Domain: protocol-config
+- Status: returned
+- Retry: after-caller-change
+- Cause: Hash algorithm identifier zero is reserved and cannot be registered.
+- Remediation: Use a non-zero algorithm identifier.
+- Suggested HTTP status: 400
+- Client message: "Invalid hash algorithm identifier"
+
+### 104 - `HashAlgorithmNotActive`
+
+- Enum: `ProtocolConfigError`
+- Domain: protocol-config
+- Status: returned
+- Retry: after-operator-action
+- Cause: The hash algorithm is approved but governance has not activated it yet.
+- Remediation: Wait for governance to activate the algorithm before creating commitments with it.
+- Suggested HTTP status: 409
+- Client message: "Hash algorithm is not active"
+
+### 105 - `RegistryUnavailable`
+
+- Enum: `ProtocolConfigError`
+- Domain: protocol-config
+- Status: returned
+- Retry: after-operator-action
+- Cause: The contract has no administrator or has been decommissioned, so the algorithm registry cannot change.
+- Remediation: Initialize the contract, or use the successor deployment if this one is decommissioned.
+- Suggested HTTP status: 503
+- Client message: "Registry unavailable"
 
 ### 200 - `IssuerAlreadyRegistered`
 
@@ -824,5 +904,93 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Remediation: Query `get_nullifier_domain_versions` and submit a nullifier derived under a currently supported version.
 - Suggested HTTP status: 400
 - Client message: "Unsupported nullifier domain version"
+
+### 327 - `StalePolicyVersion`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: The caller pinned an authority policy version that is not the version currently in force.
+- Remediation: Read the current authority policy version and resubmit the revocation pinned to it.
+- Suggested HTTP status: 409
+- Client message: "Authority policy version is stale"
+
+### 328 - `ActivationNotEligible`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The proof cannot be acknowledged as activated: it is revoked, superseded, disputed, expired, not delayed, or its activation time has not arrived.
+- Remediation: Query the activation blocker for the proof. Only an eligible delayed proof can be acknowledged.
+- Suggested HTTP status: 409
+- Client message: "Proof is not eligible for activation"
+
+### 329 - `ActivationAlreadyAcknowledged`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: An activation acknowledgement is already recorded for this proof.
+- Remediation: Read the stored acknowledgement. It is immutable and cannot be repeated.
+- Suggested HTTP status: 409
+- Client message: "Activation already acknowledged"
+
+### 330 - `UnauthorizedActivator`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: The caller is neither the proof issuer nor an address the issuer authorized to acknowledge activations.
+- Remediation: Sign as the issuer, or ask the issuer to authorize the activator first.
+- Suggested HTTP status: 403
+- Client message: "Activator is not authorized"
+
+### 331 - `ResolverConflictOfInterest`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The resolver is the issuer, a subject-authorized actor, or the evidence submitter for this dispute, by address or by participant commitment.
+- Remediation: Assign a different resolver. Rotating the resolver address does not clear the conflict.
+- Suggested HTTP status: 403
+- Client message: "Resolver has a conflict of interest"
+
+### 332 - `ResolverNotRegistered`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: The resolver address has no registered participant commitment.
+- Remediation: Ask the administrator to register the resolver with a participant commitment.
+- Suggested HTTP status: 403
+- Client message: "Resolver is not registered"
+
+### 333 - `InvalidPolicyVersion`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: The new authority policy version is not greater than the current one.
+- Remediation: Supply a version strictly greater than the current authority policy version.
+- Suggested HTTP status: 400
+- Client message: "Invalid authority policy version"
+
+### 334 - `ParticipantCommitmentLocked`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: A different participant commitment is already bound to this address and bindings are write-once.
+- Remediation: Keep using the bound commitment. A participant that needs a new commitment must use a new address.
+- Suggested HTTP status: 409
+- Client message: "Participant commitment is locked"
 
 <!-- END GENERATED -->

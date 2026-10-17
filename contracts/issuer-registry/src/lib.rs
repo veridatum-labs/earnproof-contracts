@@ -40,6 +40,9 @@ enum DataKey {
     Admin,
     Issuer(BytesN<32>),
     AddressIssuer(Address),
+    /// Stable issuer identifier for an address the issuer rotated away from.
+    /// Written once at rotation so address rotation cannot hide identity.
+    FormerAddressIssuer(Address),
     IssuerTtl(BytesN<32>),
     AddressTtl(Address),
     InstanceLiveUntil,
@@ -1860,6 +1863,13 @@ impl IssuerRegistryContract {
         env.storage()
             .persistent()
             .remove(&DataKey::AddressTtl(old_address.clone()));
+        let former_key = DataKey::FormerAddressIssuer(old_address.clone());
+        env.storage().persistent().set(&former_key, &issuer_id_hash);
+        env.storage().persistent().extend_ttl(
+            &former_key,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
         record.issuer_address = pending.new_address.clone();
         let now = env.ledger().timestamp();
         record.updated_at = now;
@@ -2090,6 +2100,21 @@ impl IssuerRegistryContract {
             Some(id) => Self::is_active_issuer(env, id),
             None => false,
         }
+    }
+
+    /// Stable issuer identifier for an address, current or former. Dispute
+    /// conflict checks use it so rotating an issuer address does not change
+    /// who the issuer is. Returns `None` for an address never seen as an
+    /// issuer address.
+    pub fn get_issuer_id_for_address(env: Env, address: Address) -> Option<BytesN<32>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AddressIssuer(address.clone()))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get(&DataKey::FormerAddressIssuer(address))
+            })
     }
 
     // ── epoch, capacity, cooldown, interface version ──────────────────────────

@@ -208,7 +208,7 @@ fn a_rotated_out_issuer_address_loses_issuer_status() {
     assert!(
         deployment
             .proofs
-            .try_register_proof_with_type_identifier(
+            .try_register_typed_proof(
                 &proof_id,
                 &commitment,
                 &old,
@@ -240,7 +240,7 @@ fn a_rotated_out_issuer_address_loses_issuer_status() {
     assert!(
         deployment
             .proofs
-            .try_register_proof_with_type_identifier(
+            .try_register_typed_proof(
                 &proof_id,
                 &commitment,
                 &replacement,

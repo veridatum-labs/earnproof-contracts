@@ -296,7 +296,7 @@ fn register_proof_emits_proof_registered_with_the_advanced_epoch() {
     let expires_at = deployment.env.ledger().timestamp() + 100_000;
 
     let events = deployment.capture(|| {
-        deployment.proofs.register_proof_with_type_identifier(
+        deployment.proofs.register_typed_proof(
             &proof_id,
             &hash(&deployment.env, 0xEE),
             &deployment.issuer,
@@ -365,7 +365,7 @@ fn a_rejected_registration_publishes_no_event_and_does_not_advance_the_epoch() {
     let expires_at = deployment.env.ledger().timestamp() + 100_000;
 
     let events = deployment.capture(|| {
-        let _ = deployment.proofs.try_register_proof_with_type_identifier(
+        let _ = deployment.proofs.try_register_typed_proof(
             &hash(&deployment.env, 0x31),
             &hash(&deployment.env, 0x32),
             &deployment.issuer,

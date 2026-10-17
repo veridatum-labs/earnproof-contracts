@@ -289,7 +289,7 @@ impl Deployment<'_> {
             &self.env,
             &self.issuer,
             &self.proofs_address,
-            "register_proof_with_type_identifier",
+            "register_typed_proof",
             (
                 &proof_id,
                 &commitment,
@@ -300,7 +300,7 @@ impl Deployment<'_> {
             )
                 .into_val(&self.env),
         );
-        self.proofs.register_proof_with_type_identifier(
+        self.proofs.register_typed_proof(
             &proof_id,
             &commitment,
             &self.issuer,

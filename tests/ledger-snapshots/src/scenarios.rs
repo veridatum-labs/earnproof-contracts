@@ -130,7 +130,7 @@ pub fn build(name: &str) -> Scenario {
             )
         });
         recorder.after(&env, || {
-            proofs.register_proof_with_type_identifier(
+            proofs.register_typed_proof(
                 &bytes32(&env, PROOF_ID),
                 &bytes32(&env, PROOF_COMMITMENT),
                 &issuer,

@@ -315,7 +315,7 @@ pub fn deployment() -> Deployment {
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
     proofs.initialize(&admin, &issuers_id, &config_id);
-    proofs.register_proof_with_type_identifier(
+    proofs.register_typed_proof(
         &proof_id,
         &bytes32(&env, 6),
         &issuer,
@@ -429,7 +429,7 @@ pub fn exercised_deployment() -> Deployment {
     let proofs_id = env.register(ProofRegistryContract, ());
     let proofs = ProofRegistryContractClient::new(&env, &proofs_id);
     proofs.initialize(&admin, &issuers_id, &config_id);
-    proofs.register_proof_with_type_identifier(
+    proofs.register_typed_proof(
         &proof_id,
         &bytes32(&env, 6),
         &rotated_issuer,
@@ -446,7 +446,7 @@ pub fn exercised_deployment() -> Deployment {
         &Some(proof_id.clone()),
         &soroban_sdk::BytesN::from_array(&env, &[1; 32]),
     );
-    proofs.register_proof_with_type_identifier(
+    proofs.register_typed_proof(
         &bytes32(&env, 7),
         &bytes32(&env, 8),
         &rotated_issuer,
@@ -471,7 +471,7 @@ pub fn exercised_deployment() -> Deployment {
     proofs.approve_upgrade(&wasm_hash_proofs, &2);
     proofs.approve_upgrade(&pending_proofs, &3);
 
-    proofs.register_proof_with_type_identifier_and_payload(
+    proofs.register_typed_proof_payload(
         &bytes32(&env, 9),
         &bytes32(&env, 10),
         &rotated_issuer,

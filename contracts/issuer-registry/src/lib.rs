@@ -1,32 +1,26 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, GenesisRecord, GovernanceRole, GovernanceRoleAssignment, InterfaceVersion,
-    IssuerAssuranceLevelCommitment, IssuerError, IssuerPolicyCommitments, IssuerQueryStatus,
-    IssuerRecord, IssuerStatus, IssuerStatusResult, MigrationStatus, RotationRecord,
-    SigningKeyCommitment, SigningKeyLifecycleRecord, SigningKeyLifecycleTransition, TtlStatus,
-    UpgradeApproval, UpgradeReceipt, ISSUER_ASSURANCE_COMMITMENT_VERSION,
-    ISSUER_ASSURANCE_HISTORY_CAPACITY, ISSUER_REGISTRY_INTERFACE_VERSION,
-    MAX_ISSUER_ASSURANCE_HISTORY_PAGE, MAX_ISSUER_ASSURANCE_LEVEL, MAX_ISSUER_STATUS_BATCH,
-    MAX_MIGRATION_BATCH, MAX_SIGNING_KEY_LIFECYCLE_PAGE, METADATA_REVISION_INITIAL,
-    MIGRATION_STATUS_VERSION, SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY, TTL_EXTEND_TO_LEDGERS,
-    AdminTransferState, AdminTransferStatus, CompromisedSigningKeyRecord, ContractError,
-    GenesisRecord, GovernanceAssignmentState, GovernanceRole, GovernanceRoleAssignment,
-    InterfaceVersion, IssuerError, IssuerPolicyCommitments, IssuerQueryStatus, IssuerRecord,
-    IssuerStatus, IssuerStatusResult, MigrationStatus, RotationRecord, SigningKeyCommitment,
-    TtlStatus, UpgradeApproval, UpgradeReceipt, ADMIN_TRANSFER_EXPIRY_LEDGERS,
-    ISSUER_REGISTRY_INTERFACE_VERSION, MAX_GOVERNANCE_ROLE_ACTIVATION_DELAY_LEDGERS,
-    MAX_ISSUER_STATUS_BATCH, MAX_MIGRATION_BATCH, MAX_SIGNING_KEY_COMPROMISE_HISTORY_PAGE,
-    METADATA_REVISION_INITIAL, MIGRATION_STATUS_VERSION, TTL_EXTEND_TO_LEDGERS,
-    TTL_THRESHOLD_LEDGERS, UPGRADE_APPROVAL_EXPIRY_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
-    ContractError, GenesisRecord, GovernanceRole, GovernanceRoleAssignment, InterfaceVersion,
-    IssuerError, IssuerPolicyCommitments, IssuerQueryStatus, IssuerRecord, IssuerRevocationResult,
-    IssuerRevocationState, IssuerRevocationTombstone, IssuerStatus, IssuerStatusResult,
-    MigrationStatus, RotationRecord, SigningKeyCommitment, TtlStatus, UpgradeApproval,
-    UpgradeReceipt, ISSUER_REGISTRY_INTERFACE_VERSION, ISSUER_REVOCATION_TOMBSTONE_VERSION,
-    MAX_ISSUER_STATUS_BATCH, MAX_MIGRATION_BATCH, METADATA_REVISION_INITIAL,
-    MIGRATION_STATUS_VERSION, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
-    UPGRADE_APPROVAL_EXPIRY_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
+    can_finalize_decommission, capability_report, deployment_identity, grace_end_ledger,
+    is_reviewed_layout_migration, is_valid_deployment_domain, storage_layout_status,
+    AdminTransferState, AdminTransferStatus, CompromisedSigningKeyRecord, ContractCapabilities,
+    ContractError, DecommissionPhase, DecommissionState, DeploymentIdentity, GenesisRecord,
+    GovernanceAssignmentState, GovernanceRole, GovernanceRoleAssignment, GovernanceRoleState,
+    InterfaceVersion, IssuerAssuranceLevelCommitment, IssuerError, IssuerPolicyCommitments,
+    IssuerQueryStatus, IssuerRecord, IssuerRevocationResult, IssuerRevocationState,
+    IssuerRevocationTombstone, IssuerStatus, IssuerStatusResult, MigrationStatus, RotationRecord,
+    SigningKeyCommitment, SigningKeyLifecycleRecord, SigningKeyLifecycleTransition,
+    StorageLayoutCompatibility, StorageLayoutStatus, TtlStatus, UpgradeApproval, UpgradeReceipt,
+    ADMIN_TRANSFER_EXPIRY_LEDGERS, CAPABILITY_BITMAP_VERSION, DECOMMISSION_STATE_VERSION,
+    ISSUER_ASSURANCE_COMMITMENT_VERSION, ISSUER_ASSURANCE_HISTORY_CAPACITY,
+    ISSUER_REGISTRY_CAPABILITIES, ISSUER_REGISTRY_INTERFACE_VERSION,
+    ISSUER_REGISTRY_STORAGE_LAYOUT, ISSUER_REVOCATION_TOMBSTONE_VERSION, LEGACY_STORAGE_LAYOUT,
+    MAX_GOVERNANCE_ROLE_ACTIVATION_DELAY_LEDGERS, MAX_ISSUER_ASSURANCE_HISTORY_PAGE,
+    MAX_ISSUER_ASSURANCE_LEVEL, MAX_ISSUER_STATUS_BATCH, MAX_MIGRATION_BATCH,
+    MAX_SIGNING_KEY_COMPROMISE_HISTORY_PAGE, MAX_SIGNING_KEY_LIFECYCLE_PAGE,
+    METADATA_REVISION_INITIAL, MIGRATION_STATUS_VERSION, SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY,
+    TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS, UPGRADE_APPROVAL_EXPIRY_LEDGERS,
+    UPGRADE_TIMELOCK_LEDGERS,
 };
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec};
 
@@ -50,6 +44,14 @@ enum DataKey {
     ContractVersion,
     Successor,
     Decommissioned,
+    /// Write-once deployment domain mixed into the deployment identity.
+    DeploymentDomain,
+    /// Decommission grace record; absent until grace starts.
+    DecommissionGrace,
+    /// Active storage layout version; absent on legacy deployments (layout 1).
+    StorageLayoutVersion,
+    /// Target of a started, incomplete storage layout step.
+    StorageLayoutMigration,
     PendingAdmin,
     PendingAdminNominatedAt,
     PendingAdminExpiresAt,
@@ -305,6 +307,8 @@ pub struct SigningKeyLifecycleChanged {
     pub transition: SigningKeyLifecycleTransition,
     pub sequence: u64,
     pub effective_ledger: u32,
+}
+
 /// Emitted once when an issuer signing-key commitment is declared compromised.
 #[contractevent]
 pub struct IssuerSigningKeyCompromised {
@@ -347,6 +351,39 @@ pub struct ContractDecommissioned {
 // ---------------------------------------------------------------------------
 // Contract implementation
 // ---------------------------------------------------------------------------
+
+/// Emitted once when the write-once deployment domain is set.
+#[contractevent]
+pub struct DeploymentDomainSet {
+    pub deployment_domain: BytesN<32>,
+    pub commitment: BytesN<32>,
+    pub set_by: Address,
+}
+
+/// Emitted when a reviewed storage layout step starts.
+#[contractevent]
+pub struct StorageLayoutMigrationStarted {
+    pub from_layout: u32,
+    pub to_layout: u32,
+    pub started_by: Address,
+}
+
+/// Emitted when a reviewed storage layout step completes.
+#[contractevent]
+pub struct StorageLayoutMigrated {
+    pub from_layout: u32,
+    pub to_layout: u32,
+    pub completed_by: Address,
+}
+
+/// Emitted when the read-only decommission grace phase starts.
+#[contractevent]
+pub struct DecommissionGraceStarted {
+    pub successor: Address,
+    pub grace_started_ledger: u32,
+    pub grace_ends_ledger: u32,
+    pub started_by: Address,
+}
 
 #[contractimpl]
 impl IssuerRegistryContract {
@@ -421,6 +458,8 @@ impl IssuerRegistryContract {
         } else {
             GovernanceRoleState::Expired
         }
+    }
+
     pub fn get_governance_assignment_state(
         env: Env,
         role: GovernanceRole,
@@ -519,7 +558,7 @@ impl IssuerRegistryContract {
     }
 
     fn ensure_not_decommissioned(env: &Env) -> Result<(), IssuerError> {
-        if Self::is_decommissioned(env.clone()) {
+        if Self::is_decommissioned(env.clone()) || Self::in_decommission_grace(env) {
             Err(IssuerError::InvalidTransition)
         } else {
             Ok(())
@@ -571,6 +610,10 @@ impl IssuerRegistryContract {
         env.storage()
             .instance()
             .set(&DataKey::ContractVersion, &1_u32);
+        env.storage().instance().set(
+            &DataKey::StorageLayoutVersion,
+            &ISSUER_REGISTRY_STORAGE_LAYOUT,
+        );
         let genesis = GenesisRecord {
             genesis_id: earnproof_shared::compute_genesis_id(&env, "earnproof_issuer_registry"),
             initialized_at_ledger: env.ledger().sequence(),
@@ -817,6 +860,304 @@ impl IssuerRegistryContract {
         }
         .publish(&env);
         Ok(())
+    }
+
+    // ── capability bitmap, storage layout, deployment identity, grace ─────────
+
+    /// Versioned capability report. The bitmap is a constant of the deployed
+    /// code; only `contract_version` is read from storage.
+    pub fn get_capabilities(env: Env) -> ContractCapabilities {
+        capability_report(
+            ISSUER_REGISTRY_INTERFACE_VERSION,
+            Self::get_contract_version(env),
+            ISSUER_REGISTRY_CAPABILITIES,
+        )
+    }
+
+    /// Whether this build implements `capability`. Undefined or out-of-range
+    /// identifiers report `false`.
+    pub fn has_capability(_env: Env, capability: u32) -> bool {
+        earnproof_shared::has_capability(
+            CAPABILITY_BITMAP_VERSION,
+            ISSUER_REGISTRY_CAPABILITIES,
+            capability,
+        )
+    }
+
+    /// Active storage layout, code layout, pending migration target, and
+    /// compatibility state.
+    pub fn get_storage_layout(env: Env) -> StorageLayoutStatus {
+        let active = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageLayoutVersion)
+            .unwrap_or(LEGACY_STORAGE_LAYOUT);
+        let pending = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageLayoutMigration);
+        storage_layout_status(active, ISSUER_REGISTRY_STORAGE_LAYOUT, pending)
+    }
+
+    /// Admin-only: records the start of the reviewed layout step to
+    /// `target_layout`. Replaying the same target is a no-op.
+    pub fn begin_layout_migration(
+        env: Env,
+        target_layout: u32,
+    ) -> Result<StorageLayoutStatus, ContractError> {
+        Self::ensure_lifecycle_active(&env)?;
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        let status = Self::get_storage_layout(env.clone());
+        match status.compatibility {
+            StorageLayoutCompatibility::MigrationInProgress => {
+                return if status.migration_target == target_layout {
+                    Ok(status)
+                } else {
+                    Err(ContractError::InvalidState)
+                };
+            }
+            StorageLayoutCompatibility::MigrationRequired => {}
+            _ => return Err(ContractError::InvalidState),
+        }
+        if status.migration_target != target_layout
+            || !is_reviewed_layout_migration(status.active_layout, target_layout)
+        {
+            return Err(ContractError::InvalidInput);
+        }
+        if Self::get_migration_status(env.clone()).is_some_and(|migration| !migration.complete) {
+            return Err(ContractError::InvalidState);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageLayoutMigration, &target_layout);
+        Self::extend_instance_ttl(env.clone());
+        StorageLayoutMigrationStarted {
+            from_layout: status.active_layout,
+            to_layout: target_layout,
+            started_by: admin,
+        }
+        .publish(&env);
+        Ok(Self::get_storage_layout(env))
+    }
+
+    /// Admin-only: completes the started layout step. The active layout moves
+    /// only here, by exactly the recorded reviewed step.
+    pub fn complete_layout_migration(
+        env: Env,
+        target_layout: u32,
+    ) -> Result<StorageLayoutStatus, ContractError> {
+        Self::ensure_lifecycle_active(&env)?;
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        let pending: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageLayoutMigration)
+            .ok_or(ContractError::InvalidState)?;
+        let active = Self::get_storage_layout(env.clone()).active_layout;
+        if pending != target_layout
+            || target_layout > ISSUER_REGISTRY_STORAGE_LAYOUT
+            || !is_reviewed_layout_migration(active, target_layout)
+        {
+            return Err(ContractError::InvalidState);
+        }
+        if Self::get_migration_status(env.clone()).is_some_and(|migration| !migration.complete) {
+            return Err(ContractError::InvalidState);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageLayoutVersion, &target_layout);
+        env.storage()
+            .instance()
+            .remove(&DataKey::StorageLayoutMigration);
+        Self::extend_instance_ttl(env.clone());
+        StorageLayoutMigrated {
+            from_layout: active,
+            to_layout: target_layout,
+            completed_by: admin,
+        }
+        .publish(&env);
+        Ok(Self::get_storage_layout(env))
+    }
+
+    /// Admin-only, write-once: sets the deployment domain mixed into this
+    /// contract's deployment identity. Replaying the same domain is a no-op;
+    /// a different domain is rejected.
+    pub fn set_deployment_domain(
+        env: Env,
+        deployment_domain: BytesN<32>,
+    ) -> Result<DeploymentIdentity, ContractError> {
+        Self::ensure_lifecycle_active(&env)?;
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        if !is_valid_deployment_domain(&env, &deployment_domain) {
+            return Err(ContractError::InvalidInput);
+        }
+        let identity = deployment_identity(&env, &deployment_domain);
+        if let Some(existing) = env
+            .storage()
+            .instance()
+            .get::<_, BytesN<32>>(&DataKey::DeploymentDomain)
+        {
+            return if existing == deployment_domain {
+                Ok(identity)
+            } else {
+                Err(ContractError::DeploymentIdentityMismatch)
+            };
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::DeploymentDomain, &deployment_domain);
+        Self::extend_instance_ttl(env.clone());
+        DeploymentDomainSet {
+            deployment_domain,
+            commitment: identity.commitment.clone(),
+            set_by: admin,
+        }
+        .publish(&env);
+        Ok(identity)
+    }
+
+    /// Network and deployment-domain identity, or `None` before a domain is set.
+    pub fn get_deployment_identity(env: Env) -> Option<DeploymentIdentity> {
+        env.storage()
+            .instance()
+            .get::<_, BytesN<32>>(&DataKey::DeploymentDomain)
+            .map(|domain| deployment_identity(&env, &domain))
+    }
+
+    /// Admin-only: enters the read-only grace phase toward the nominated
+    /// successor. The window is fixed once started.
+    pub fn begin_decommission_grace(
+        env: Env,
+        proposal_id: BytesN<32>,
+        grace_ledgers: u32,
+    ) -> Result<DecommissionState, ContractError> {
+        Self::ensure_lifecycle_active(&env)?;
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        let successor: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Successor)
+            .ok_or(ContractError::NotFound)?;
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::StorageLayoutMigration)
+            || Self::get_migration_status(env.clone()).is_some_and(|migration| !migration.complete)
+        {
+            return Err(ContractError::InvalidState);
+        }
+        let started = env.ledger().sequence();
+        let ends =
+            grace_end_ledger(started, grace_ledgers).ok_or(ContractError::InvalidTimingConfig)?;
+        Self::consume_proposal(&env, &proposal_id)?;
+        let state = DecommissionState {
+            state_version: DECOMMISSION_STATE_VERSION,
+            phase: DecommissionPhase::Grace,
+            successor: Some(successor.clone()),
+            grace_started_ledger: started,
+            grace_ends_ledger: ends,
+            finalized_ledger: 0,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::DecommissionGrace, &state);
+        Self::extend_instance_ttl(env.clone());
+        DecommissionGraceStarted {
+            successor,
+            grace_started_ledger: started,
+            grace_ends_ledger: ends,
+            started_by: admin,
+        }
+        .publish(&env);
+        Ok(state)
+    }
+
+    /// Admin-only: moves a grace record to the terminal decommissioned state
+    /// at or after `grace_ends_ledger`.
+    pub fn finalize_decommission(
+        env: Env,
+        proposal_id: BytesN<32>,
+    ) -> Result<DecommissionState, ContractError> {
+        if Self::is_decommissioned(env.clone()) {
+            return Err(ContractError::InvalidState);
+        }
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        let mut state: DecommissionState = env
+            .storage()
+            .instance()
+            .get(&DataKey::DecommissionGrace)
+            .ok_or(ContractError::InvalidState)?;
+        let now = env.ledger().sequence();
+        if state.phase != DecommissionPhase::Grace {
+            return Err(ContractError::InvalidState);
+        }
+        if !can_finalize_decommission(&state, now) {
+            return Err(ContractError::InvalidTimingConfig);
+        }
+        let successor = state.successor.clone().ok_or(ContractError::InvalidState)?;
+        Self::consume_proposal(&env, &proposal_id)?;
+        state.phase = DecommissionPhase::Finalized;
+        state.finalized_ledger = now;
+        env.storage()
+            .instance()
+            .set(&DataKey::DecommissionGrace, &state);
+        env.storage()
+            .instance()
+            .set(&DataKey::Decommissioned, &true);
+        Self::extend_instance_ttl(env.clone());
+        ContractDecommissioned {
+            proposal_id,
+            old_instance: env.current_contract_address(),
+            successor_instance: successor,
+            activated_by: admin,
+        }
+        .publish(&env);
+        Ok(state)
+    }
+
+    /// Current decommission phase. Legacy immediate decommissions report
+    /// `Finalized` with zero ledgers.
+    pub fn get_decommission_state(env: Env) -> DecommissionState {
+        if let Some(state) = env
+            .storage()
+            .instance()
+            .get::<_, DecommissionState>(&DataKey::DecommissionGrace)
+        {
+            return state;
+        }
+        let phase = if Self::is_decommissioned(env.clone()) {
+            DecommissionPhase::Finalized
+        } else {
+            DecommissionPhase::Active
+        };
+        DecommissionState {
+            state_version: DECOMMISSION_STATE_VERSION,
+            phase,
+            successor: env.storage().instance().get(&DataKey::Successor),
+            grace_started_ledger: 0,
+            grace_ends_ledger: 0,
+            finalized_ledger: 0,
+        }
+    }
+
+    fn in_decommission_grace(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<_, DecommissionState>(&DataKey::DecommissionGrace)
+            .is_some_and(|state| state.phase == DecommissionPhase::Grace)
+    }
+
+    fn ensure_lifecycle_active(env: &Env) -> Result<(), ContractError> {
+        if Self::is_decommissioned(env.clone()) || Self::in_decommission_grace(env) {
+            Err(ContractError::InvalidState)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn keepalive_instance(env: Env) -> bool {
@@ -1082,25 +1423,18 @@ impl IssuerRegistryContract {
                 env.clone(),
                 issuer_id.clone(),
                 key_hash.clone(),
-        if env
-            .storage()
-            .persistent()
-            .has(&DataKey::CompromisedSigningKey(
-                issuer_id.clone(),
-                key_hash.clone(),
-                algorithm,
-            ))
-        {
-            return Err(IssuerError::InvalidTransition);
-        }
-        env.storage().persistent().set(
-            &DataKey::PendingSigningKey(issuer_id),
-            &SigningKeyCommitment {
-                key_hash,
                 algorithm,
             )
             .map(|state| state.transition == SigningKeyLifecycleTransition::Compromised)
             .unwrap_or(false)
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::CompromisedSigningKey(
+                    issuer_id.clone(),
+                    key_hash.clone(),
+                    algorithm,
+                ))
         {
             return Err(IssuerError::InvalidTransition);
         }
@@ -1263,75 +1597,6 @@ impl IssuerRegistryContract {
         Ok(record)
     }
 
-    /// Records a terminal compromise transition for a known key commitment.
-    /// No raw key material or free-form incident data is accepted.
-    /// Permanently marks a known active, pending, or retired signing-key
-    /// commitment as compromised. The immutable sidecar is deliberately
-    /// separate from legacy signing-key records to preserve their encoding.
-    pub fn mark_signing_key_compromised(
-        env: Env,
-        issuer_id: BytesN<32>,
-        key_hash: BytesN<32>,
-        algorithm: u32,
-    ) -> Result<SigningKeyLifecycleRecord, IssuerError> {
-        Self::assert_operational(&env);
-        let admin = Self::get_admin(env.clone()).map_err(|_| IssuerError::IssuerNotFound)?;
-        Self::require_auth(&admin);
-        Self::get_issuer(env.clone(), issuer_id.clone())?;
-        if algorithm == 0 || Self::is_zero_hash(&env, &key_hash) {
-            return Err(IssuerError::InvalidMetadataCommitment);
-        }
-        if Self::stored_signing_key_state(
-            env.clone(),
-            issuer_id.clone(),
-            key_hash.clone(),
-            algorithm,
-        )
-        .map(|state| state.transition == SigningKeyLifecycleTransition::Compromised)
-        .unwrap_or(false)
-        {
-            return Err(IssuerError::InvalidTransition);
-        }
-
-        let pending_key = DataKey::PendingSigningKey(issuer_id.clone());
-        let active_key = DataKey::ActiveSigningKey(issuer_id.clone());
-        let pending_match = env
-            .storage()
-            .persistent()
-            .get::<_, SigningKeyCommitment>(&pending_key)
-            .map(|pending| pending.key_hash == key_hash && pending.algorithm == algorithm)
-            .unwrap_or(false);
-        let active_match = env
-            .storage()
-            .persistent()
-            .get::<_, SigningKeyCommitment>(&active_key)
-            .map(|active| active.key_hash == key_hash && active.algorithm == algorithm)
-            .unwrap_or(false);
-        let prior_match = Self::get_prior_issuer_signing_keys(env.clone(), issuer_id.clone())
-            .iter()
-            .any(|prior| prior.key_hash == key_hash && prior.algorithm == algorithm);
-        if !pending_match && !active_match && !prior_match {
-            return Err(IssuerError::InvalidTransition);
-        }
-        let sequence = Self::checked_signing_key_sequence(env.clone(), issuer_id.clone(), 1)?;
-        if pending_match {
-            env.storage().persistent().remove(&pending_key);
-        }
-        if active_match {
-            env.storage().persistent().remove(&active_key);
-        }
-        let record = Self::append_signing_key_transition(
-            env.clone(),
-            issuer_id.clone(),
-            key_hash,
-            algorithm,
-            SigningKeyLifecycleTransition::Compromised,
-            sequence,
-        );
-        Self::store_signing_key_sequence(env, issuer_id, sequence);
-        Ok(record)
-    }
-
     pub fn get_signing_key_usage_sequence(env: Env, issuer_id: BytesN<32>) -> u64 {
         let key = DataKey::SigningKeyUsageSequence(issuer_id);
         let sequence = env.storage().persistent().get(&key).unwrap_or(0);
@@ -1342,6 +1607,59 @@ impl IssuerRegistryContract {
     }
 
     pub fn get_issuer_signing_key_state(
+        env: Env,
+        issuer_id: BytesN<32>,
+        key_hash: BytesN<32>,
+        algorithm: u32,
+    ) -> Option<SigningKeyLifecycleRecord> {
+        Self::stored_signing_key_state(env, issuer_id, key_hash, algorithm)
+    }
+
+    /// Returns retained lifecycle entries in ascending sequence order.
+    pub fn get_signing_key_lifecycle(
+        env: Env,
+        issuer_id: BytesN<32>,
+        cursor: u64,
+        limit: u32,
+    ) -> Result<Vec<SigningKeyLifecycleRecord>, IssuerError> {
+        if limit > MAX_SIGNING_KEY_LIFECYCLE_PAGE {
+            return Err(IssuerError::BatchTooLarge);
+        }
+        let latest = Self::get_signing_key_usage_sequence(env.clone(), issuer_id.clone());
+        let oldest = latest.saturating_sub(u64::from(
+            SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY.saturating_sub(1),
+        ));
+        let mut sequence = cursor.max(1).max(oldest);
+        let mut records = Vec::new(&env);
+        while sequence <= latest && records.len() < limit {
+            let slot = ((sequence - 1) % u64::from(SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY)) as u32;
+            let key = DataKey::SigningKeyLifecycleHistory(issuer_id.clone(), slot);
+            if let Some(record) = env
+                .storage()
+                .persistent()
+                .get::<_, SigningKeyLifecycleRecord>(&key)
+            {
+                if record.sequence == sequence {
+                    records.push_back(record);
+                    Self::extend_issuer_key_ttl(env.clone(), &key);
+                }
+            }
+            if sequence == latest {
+                break;
+            }
+            sequence += 1;
+        }
+        Ok(records)
+    }
+
+    /// Permanently marks a known active, pending, or retired signing-key
+    /// commitment as compromised. The immutable sidecar is deliberately
+    /// separate from legacy signing-key records to preserve their encoding.
+    pub fn mark_signing_key_compromised(
+        env: Env,
+        issuer_id: BytesN<32>,
+        key_hash: BytesN<32>,
+        algorithm: u32,
         reason_hash: BytesN<32>,
     ) -> Result<CompromisedSigningKeyRecord, IssuerError> {
         Self::assert_operational(&env);
@@ -1405,10 +1723,12 @@ impl IssuerRegistryContract {
         if sequence == u32::MAX {
             return Err(IssuerError::InvalidTransition);
         }
+        let lifecycle_sequence =
+            Self::checked_signing_key_sequence(env.clone(), issuer_id.clone(), 1)?;
         let record = CompromisedSigningKeyRecord {
             record_version: 1,
             issuer_id_hash: issuer_id.clone(),
-            key_hash,
+            key_hash: key_hash.clone(),
             algorithm,
             effective_ledger: env.ledger().sequence(),
             reason_hash,
@@ -1416,7 +1736,7 @@ impl IssuerRegistryContract {
         };
 
         let history_key = DataKey::CompromisedSigningKeyHistory(issuer_id.clone(), sequence);
-        let count_key = DataKey::CompromisedSigningKeyCount(issuer_id);
+        let count_key = DataKey::CompromisedSigningKeyCount(issuer_id.clone());
         env.storage().persistent().set(&marker, &record);
         env.storage().persistent().set(&history_key, &record);
         env.storage().persistent().set(&count_key, &(sequence + 1));
@@ -1433,6 +1753,15 @@ impl IssuerRegistryContract {
         if pending_matches {
             env.storage().persistent().remove(&pending_key);
         }
+        Self::append_signing_key_transition(
+            env.clone(),
+            issuer_id.clone(),
+            key_hash,
+            algorithm,
+            SigningKeyLifecycleTransition::Compromised,
+            lifecycle_sequence,
+        );
+        Self::store_signing_key_sequence(env.clone(), issuer_id, lifecycle_sequence);
         IssuerSigningKeyCompromised {
             record: record.clone(),
             marked_by: admin,
@@ -1446,43 +1775,6 @@ impl IssuerRegistryContract {
         issuer_id: BytesN<32>,
         key_hash: BytesN<32>,
         algorithm: u32,
-    ) -> Option<SigningKeyLifecycleRecord> {
-        Self::stored_signing_key_state(env, issuer_id, key_hash, algorithm)
-    }
-
-    /// Returns retained lifecycle entries in ascending sequence order.
-    pub fn get_signing_key_lifecycle(
-        env: Env,
-        issuer_id: BytesN<32>,
-        cursor: u64,
-        limit: u32,
-    ) -> Result<Vec<SigningKeyLifecycleRecord>, IssuerError> {
-        if limit > MAX_SIGNING_KEY_LIFECYCLE_PAGE {
-            return Err(IssuerError::BatchTooLarge);
-        }
-        let latest = Self::get_signing_key_usage_sequence(env.clone(), issuer_id.clone());
-        let oldest = latest.saturating_sub(u64::from(
-            SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY.saturating_sub(1),
-        ));
-        let mut sequence = cursor.max(1).max(oldest);
-        let mut records = Vec::new(&env);
-        while sequence <= latest && records.len() < limit {
-            let slot = ((sequence - 1) % u64::from(SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY)) as u32;
-            let key = DataKey::SigningKeyLifecycleHistory(issuer_id.clone(), slot);
-            if let Some(record) = env
-                .storage()
-                .persistent()
-                .get::<_, SigningKeyLifecycleRecord>(&key)
-            {
-                if record.sequence == sequence {
-                    records.push_back(record);
-                    Self::extend_issuer_key_ttl(env.clone(), &key);
-                }
-            }
-            if sequence == latest {
-                break;
-            }
-            sequence += 1;
     ) -> Option<CompromisedSigningKeyRecord> {
         env.storage()
             .persistent()
@@ -2596,6 +2888,9 @@ impl IssuerRegistryContract {
         if Self::is_decommissioned(env.clone()) {
             panic!("contract is decommissioned");
         }
+        if Self::in_decommission_grace(env) {
+            panic!("contract is in decommission grace");
+        }
         if Self::get_migration_status(env.clone()).is_some_and(|status| !status.complete) {
             panic!("storage migration in progress");
         }
@@ -3006,13 +3301,10 @@ mod test {
 
     use super::{DataKey, IssuerRegistryContract, IssuerRegistryContractClient};
     use earnproof_shared::{
-        ContractError, GovernanceRole, GovernanceRoleState, IssuerError, IssuerQueryStatus,
-        IssuerStatus, IssuerStatusResult, MAX_ISSUER_STATUS_BATCH, TTL_THRESHOLD_LEDGERS,
-        AdminTransferState, ContractError, IssuerError, IssuerQueryStatus, IssuerStatus,
-        IssuerStatusResult, ADMIN_TRANSFER_EXPIRY_LEDGERS, MAX_ISSUER_STATUS_BATCH,
-        ContractError, IssuerError, IssuerQueryStatus, IssuerRevocationState, IssuerStatus,
-        IssuerStatusResult, ISSUER_REVOCATION_TOMBSTONE_VERSION, MAX_ISSUER_STATUS_BATCH,
-        TTL_THRESHOLD_LEDGERS,
+        AdminTransferState, ContractError, GovernanceRole, GovernanceRoleState, IssuerError,
+        IssuerQueryStatus, IssuerRevocationState, IssuerStatus, IssuerStatusResult,
+        ADMIN_TRANSFER_EXPIRY_LEDGERS, ISSUER_REVOCATION_TOMBSTONE_VERSION,
+        MAX_ISSUER_STATUS_BATCH, TTL_THRESHOLD_LEDGERS,
     };
     use soroban_sdk::{
         testutils::{

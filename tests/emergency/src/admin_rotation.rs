@@ -314,7 +314,7 @@ fn a_revoked_issuer_cannot_register_new_proofs_after_unpause() {
     assert!(
         deployment
             .proofs
-            .try_register_proof_with_type_identifier(
+            .try_register_typed_proof(
                 &crate::harness::hash(&deployment.env, 0xA1),
                 &crate::harness::hash(&deployment.env, 0xA2),
                 &deployment.issuer,

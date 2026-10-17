@@ -575,7 +575,7 @@ fn matrix() -> std::vec::Vec<Case> {
                 match identity {
                     Identity::Missing => d
                         .proofs
-                        .try_register_proof_with_type_identifier(
+                        .try_register_typed_proof(
                             &proof_id,
                             &commitment,
                             &d.issuer,
@@ -592,11 +592,11 @@ fn matrix() -> std::vec::Vec<Case> {
                             &d.env,
                             &d.second_issuer,
                             &d.proofs_address,
-                            "register_proof_with_type_identifier",
+                            "register_typed_proof",
                             args.clone(),
                         );
                         d.proofs
-                            .try_register_proof_with_type_identifier(
+                            .try_register_typed_proof(
                                 &proof_id,
                                 &commitment,
                                 &d.issuer,
@@ -611,11 +611,11 @@ fn matrix() -> std::vec::Vec<Case> {
                             &d.env,
                             &d.issuer,
                             &d.proofs_address,
-                            "register_proof_with_type_identifier",
+                            "register_typed_proof",
                             args,
                         );
                         d.proofs
-                            .try_register_proof_with_type_identifier(
+                            .try_register_typed_proof(
                                 &proof_id,
                                 &commitment,
                                 &d.issuer,
@@ -751,11 +751,11 @@ fn matrix() -> std::vec::Vec<Case> {
         },
     ]
 }
-    /// A fresh, unrelated address that holds no authority anywhere. Generated
-    /// on demand so every negative attempt uses a distinct identity.
-    pub fn attacker(&self) -> Address {
-        Address::generate(&self.env)
-    }
+/// A fresh, unrelated address that holds no authority anywhere. Generated
+/// on demand so every negative attempt uses a distinct identity.
+pub fn attacker(&self) -> Address {
+    Address::generate(&self.env)
+}
 
 /// Guards against a mutating entry point being added without a documented
 /// authorization expectation. Bump only together with

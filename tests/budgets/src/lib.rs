@@ -409,6 +409,12 @@ mod tests {
         env.cost_estimate().budget().reset_unlimited();
 
         client.suspend_issuer(
+            &soroban_sdk::BytesN::from_array(&env, &{
+                let mut a = [0xA5u8; 32];
+                a[1] = 4;
+                a[2] = 0;
+                a
+            }),
             &issuer_id,
             &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32]),
         );
@@ -476,6 +482,12 @@ mod tests {
         env.cost_estimate().budget().reset_unlimited();
 
         client.revoke_issuer(
+            &soroban_sdk::BytesN::from_array(&env, &{
+                let mut a = [0xA5u8; 32];
+                a[1] = 3;
+                a[2] = 0;
+                a
+            }),
             &issuer_id,
             &soroban_sdk::BytesN::from_array(&client.env, &[1u8; 32]),
         );
@@ -656,7 +668,7 @@ mod tests {
         let proof_id = bytes(&env, 1);
         let commitment = bytes(&env, 2);
 
-        proof_client.register_proof_with_type_identifier(
+        proof_client.register_proof_typed(
             &proof_id,
             &commitment,
             &issuer,
@@ -680,7 +692,7 @@ mod tests {
 
         let proof_id = bytes(&env, 1);
         let commitment = bytes(&env, 2);
-        proof_client.register_proof_with_type_identifier(
+        proof_client.register_proof_typed(
             &proof_id,
             &commitment,
             &issuer,
@@ -708,7 +720,7 @@ mod tests {
 
         let proof_id = bytes(&env, 1);
         let commitment = bytes(&env, 2);
-        proof_client.register_proof_with_type_identifier(
+        proof_client.register_proof_typed(
             &proof_id,
             &commitment,
             &issuer,
@@ -736,7 +748,7 @@ mod tests {
 
         let proof_id = bytes(&env, 1);
         let commitment = bytes(&env, 2);
-        proof_client.register_proof_with_type_identifier(
+        proof_client.register_proof_typed(
             &proof_id,
             &commitment,
             &issuer,
@@ -821,7 +833,7 @@ mod tests {
         let mut batch = soroban_sdk::Vec::new(&env);
         for seed in 0..earnproof_shared::MAX_PROOF_BATCH_SIZE as u8 {
             let proof_id = bytes(&env, seed);
-            proof_client.register_proof_with_type_identifier(
+            proof_client.register_proof_typed(
                 &proof_id,
                 &bytes(&env, seed.wrapping_add(100)),
                 &issuer,
@@ -850,7 +862,7 @@ mod tests {
         let (proof_client, _protocol, _issuer_registry, issuer) = setup_proof_registry(&env);
 
         let proof_id = bytes(&env, 1);
-        proof_client.register_proof_with_type_identifier(
+        proof_client.register_proof_typed(
             &proof_id,
             &bytes(&env, 2),
             &issuer,
@@ -877,7 +889,7 @@ mod tests {
         let (proof_client, _protocol, _issuer_registry, issuer) = setup_proof_registry(&env);
 
         let proof_id = bytes(&env, 1);
-        proof_client.register_proof_with_type_identifier(
+        proof_client.register_proof_typed(
             &proof_id,
             &bytes(&env, 2),
             &issuer,

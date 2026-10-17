@@ -1,32 +1,21 @@
 #![no_std]
 
 use earnproof_shared::{
-    ContractError, GenesisRecord, GovernanceRole, GovernanceRoleAssignment, InterfaceVersion,
-    IssuerAssuranceLevelCommitment, IssuerError, IssuerPolicyCommitments, IssuerQueryStatus,
-    IssuerRecord, IssuerStatus, IssuerStatusResult, MigrationStatus, RotationRecord,
-    SigningKeyCommitment, SigningKeyLifecycleRecord, SigningKeyLifecycleTransition, TtlStatus,
-    UpgradeApproval, UpgradeReceipt, ISSUER_ASSURANCE_COMMITMENT_VERSION,
-    ISSUER_ASSURANCE_HISTORY_CAPACITY, ISSUER_REGISTRY_INTERFACE_VERSION,
-    MAX_ISSUER_ASSURANCE_HISTORY_PAGE, MAX_ISSUER_ASSURANCE_LEVEL, MAX_ISSUER_STATUS_BATCH,
-    MAX_MIGRATION_BATCH, MAX_SIGNING_KEY_LIFECYCLE_PAGE, METADATA_REVISION_INITIAL,
-    MIGRATION_STATUS_VERSION, SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY, TTL_EXTEND_TO_LEDGERS,
     AdminTransferState, AdminTransferStatus, CompromisedSigningKeyRecord, ContractError,
     GenesisRecord, GovernanceAssignmentState, GovernanceRole, GovernanceRoleAssignment,
-    InterfaceVersion, IssuerError, IssuerPolicyCommitments, IssuerQueryStatus, IssuerRecord,
-    IssuerStatus, IssuerStatusResult, MigrationStatus, RotationRecord, SigningKeyCommitment,
-    TtlStatus, UpgradeApproval, UpgradeReceipt, ADMIN_TRANSFER_EXPIRY_LEDGERS,
-    ISSUER_REGISTRY_INTERFACE_VERSION, MAX_GOVERNANCE_ROLE_ACTIVATION_DELAY_LEDGERS,
-    MAX_ISSUER_STATUS_BATCH, MAX_MIGRATION_BATCH, MAX_SIGNING_KEY_COMPROMISE_HISTORY_PAGE,
-    METADATA_REVISION_INITIAL, MIGRATION_STATUS_VERSION, TTL_EXTEND_TO_LEDGERS,
-    TTL_THRESHOLD_LEDGERS, UPGRADE_APPROVAL_EXPIRY_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
-    ContractError, GenesisRecord, GovernanceRole, GovernanceRoleAssignment, InterfaceVersion,
-    IssuerError, IssuerPolicyCommitments, IssuerQueryStatus, IssuerRecord, IssuerRevocationResult,
+    GovernanceRoleState, InterfaceVersion, IssuerAssuranceLevelCommitment, IssuerError,
+    IssuerPolicyCommitments, IssuerQueryStatus, IssuerRecord, IssuerRevocationResult,
     IssuerRevocationState, IssuerRevocationTombstone, IssuerStatus, IssuerStatusResult,
-    MigrationStatus, RotationRecord, SigningKeyCommitment, TtlStatus, UpgradeApproval,
-    UpgradeReceipt, ISSUER_REGISTRY_INTERFACE_VERSION, ISSUER_REVOCATION_TOMBSTONE_VERSION,
-    MAX_ISSUER_STATUS_BATCH, MAX_MIGRATION_BATCH, METADATA_REVISION_INITIAL,
-    MIGRATION_STATUS_VERSION, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
-    UPGRADE_APPROVAL_EXPIRY_LEDGERS, UPGRADE_TIMELOCK_LEDGERS,
+    MigrationStatus, RotationRecord, SigningKeyCommitment, SigningKeyLifecycleRecord,
+    SigningKeyLifecycleTransition, TtlStatus, UpgradeApproval, UpgradeReceipt,
+    ADMIN_TRANSFER_EXPIRY_LEDGERS, ISSUER_ASSURANCE_COMMITMENT_VERSION,
+    ISSUER_ASSURANCE_HISTORY_CAPACITY, ISSUER_REGISTRY_INTERFACE_VERSION,
+    ISSUER_REVOCATION_TOMBSTONE_VERSION, MAX_GOVERNANCE_ROLE_ACTIVATION_DELAY_LEDGERS,
+    MAX_ISSUER_ASSURANCE_HISTORY_PAGE, MAX_ISSUER_ASSURANCE_LEVEL, MAX_ISSUER_STATUS_BATCH,
+    MAX_MIGRATION_BATCH, MAX_SIGNING_KEY_COMPROMISE_HISTORY_PAGE, MAX_SIGNING_KEY_LIFECYCLE_PAGE,
+    METADATA_REVISION_INITIAL, MIGRATION_STATUS_VERSION, SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY,
+    TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS, UPGRADE_APPROVAL_EXPIRY_LEDGERS,
+    UPGRADE_TIMELOCK_LEDGERS,
 };
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec};
 
@@ -62,12 +51,12 @@ enum DataKey {
     PendingSigningKey(BytesN<32>),
     SigningKeyHistory(BytesN<32>, u32),
     SigningKeyHistoryCount(BytesN<32>),
-    SigningKeyUsageSequence(BytesN<32>),
-    SigningKeyLifecycleHistory(BytesN<32>, u32),
-    SigningKeyLifecycleState(BytesN<32>, BytesN<32>, u32),
     CompromisedSigningKey(BytesN<32>, BytesN<32>, u32),
     CompromisedSigningKeyHistory(BytesN<32>, u32),
     CompromisedSigningKeyCount(BytesN<32>),
+    SigningKeyUsageSequence(BytesN<32>),
+    SigningKeyLifecycleHistory(BytesN<32>, u32),
+    SigningKeyLifecycleState(BytesN<32>, BytesN<32>, u32),
     RotationHistory(BytesN<32>, u32),
     RotationCount(BytesN<32>),
     ExecutedProposal(BytesN<32>),
@@ -285,6 +274,13 @@ pub struct IssuerRotationCancelled {
     pub cancelled_by: Address,
 }
 
+/// Emitted once when an issuer signing-key commitment is declared compromised.
+#[contractevent]
+pub struct IssuerSigningKeyCompromised {
+    pub record: CompromisedSigningKeyRecord,
+    pub marked_by: Address,
+}
+
 /// Emitted after a governed issuer assurance tier change commits.
 #[contractevent]
 pub struct IssuerAssuranceLevelChanged {
@@ -305,11 +301,6 @@ pub struct SigningKeyLifecycleChanged {
     pub transition: SigningKeyLifecycleTransition,
     pub sequence: u64,
     pub effective_ledger: u32,
-/// Emitted once when an issuer signing-key commitment is declared compromised.
-#[contractevent]
-pub struct IssuerSigningKeyCompromised {
-    pub record: CompromisedSigningKeyRecord,
-    pub marked_by: Address,
 }
 
 // ── capacity and cooldown governance events ─────────────────────────────────
@@ -405,22 +396,6 @@ impl IssuerRegistryContract {
             .get(&DataKey::GovernanceAssignment(role, address))
     }
 
-    pub fn governance_role_state(
-        env: Env,
-        role: GovernanceRole,
-        address: Address,
-    ) -> GovernanceRoleState {
-        let Some(assignment) = Self::get_governance_assignment(env.clone(), role, address) else {
-            return GovernanceRoleState::Missing;
-        };
-        let ledger = env.ledger().sequence();
-        if assignment.is_pending_at(ledger) {
-            GovernanceRoleState::Pending
-        } else if assignment.is_active_at(ledger) {
-            GovernanceRoleState::Active
-        } else {
-            GovernanceRoleState::Expired
-        }
     pub fn get_governance_assignment_state(
         env: Env,
         role: GovernanceRole,
@@ -471,6 +446,24 @@ impl IssuerRegistryContract {
             );
         }
         delay.unwrap_or(0)
+    }
+
+    pub fn governance_role_state(
+        env: Env,
+        role: GovernanceRole,
+        address: Address,
+    ) -> GovernanceRoleState {
+        let Some(assignment) = Self::get_governance_assignment(env.clone(), role, address) else {
+            return GovernanceRoleState::Missing;
+        };
+        let ledger = env.ledger().sequence();
+        if assignment.is_pending_at(ledger) {
+            GovernanceRoleState::Pending
+        } else if assignment.is_active_at(ledger) {
+            GovernanceRoleState::Active
+        } else {
+            GovernanceRoleState::Expired
+        }
     }
 
     pub fn remove_governance_role(
@@ -1082,6 +1075,13 @@ impl IssuerRegistryContract {
                 env.clone(),
                 issuer_id.clone(),
                 key_hash.clone(),
+                algorithm,
+            )
+            .map(|state| state.transition == SigningKeyLifecycleTransition::Compromised)
+            .unwrap_or(false)
+        {
+            return Err(IssuerError::InvalidTransition);
+        }
         if env
             .storage()
             .persistent()
@@ -1090,17 +1090,6 @@ impl IssuerRegistryContract {
                 key_hash.clone(),
                 algorithm,
             ))
-        {
-            return Err(IssuerError::InvalidTransition);
-        }
-        env.storage().persistent().set(
-            &DataKey::PendingSigningKey(issuer_id),
-            &SigningKeyCommitment {
-                key_hash,
-                algorithm,
-            )
-            .map(|state| state.transition == SigningKeyLifecycleTransition::Compromised)
-            .unwrap_or(false)
         {
             return Err(IssuerError::InvalidTransition);
         }
@@ -1265,10 +1254,7 @@ impl IssuerRegistryContract {
 
     /// Records a terminal compromise transition for a known key commitment.
     /// No raw key material or free-form incident data is accepted.
-    /// Permanently marks a known active, pending, or retired signing-key
-    /// commitment as compromised. The immutable sidecar is deliberately
-    /// separate from legacy signing-key records to preserve their encoding.
-    pub fn mark_signing_key_compromised(
+    pub fn record_signing_key_compromise(
         env: Env,
         issuer_id: BytesN<32>,
         key_hash: BytesN<32>,
@@ -1342,6 +1328,59 @@ impl IssuerRegistryContract {
     }
 
     pub fn get_issuer_signing_key_state(
+        env: Env,
+        issuer_id: BytesN<32>,
+        key_hash: BytesN<32>,
+        algorithm: u32,
+    ) -> Option<SigningKeyLifecycleRecord> {
+        Self::stored_signing_key_state(env, issuer_id, key_hash, algorithm)
+    }
+
+    /// Returns retained lifecycle entries in ascending sequence order.
+    pub fn get_signing_key_lifecycle(
+        env: Env,
+        issuer_id: BytesN<32>,
+        cursor: u64,
+        limit: u32,
+    ) -> Result<Vec<SigningKeyLifecycleRecord>, IssuerError> {
+        if limit > MAX_SIGNING_KEY_LIFECYCLE_PAGE {
+            return Err(IssuerError::BatchTooLarge);
+        }
+        let latest = Self::get_signing_key_usage_sequence(env.clone(), issuer_id.clone());
+        let oldest = latest.saturating_sub(u64::from(
+            SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY.saturating_sub(1),
+        ));
+        let mut sequence = cursor.max(1).max(oldest);
+        let mut records = Vec::new(&env);
+        while sequence <= latest && records.len() < limit {
+            let slot = ((sequence - 1) % u64::from(SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY)) as u32;
+            let key = DataKey::SigningKeyLifecycleHistory(issuer_id.clone(), slot);
+            if let Some(record) = env
+                .storage()
+                .persistent()
+                .get::<_, SigningKeyLifecycleRecord>(&key)
+            {
+                if record.sequence == sequence {
+                    records.push_back(record);
+                    Self::extend_issuer_key_ttl(env.clone(), &key);
+                }
+            }
+            if sequence == latest {
+                break;
+            }
+            sequence += 1;
+        }
+        Ok(records)
+    }
+
+    /// Permanently marks a known active, pending, or retired signing-key
+    /// commitment as compromised. The immutable sidecar is deliberately
+    /// separate from legacy signing-key records to preserve their encoding.
+    pub fn mark_signing_key_compromised(
+        env: Env,
+        issuer_id: BytesN<32>,
+        key_hash: BytesN<32>,
+        algorithm: u32,
         reason_hash: BytesN<32>,
     ) -> Result<CompromisedSigningKeyRecord, IssuerError> {
         Self::assert_operational(&env);
@@ -1446,43 +1485,6 @@ impl IssuerRegistryContract {
         issuer_id: BytesN<32>,
         key_hash: BytesN<32>,
         algorithm: u32,
-    ) -> Option<SigningKeyLifecycleRecord> {
-        Self::stored_signing_key_state(env, issuer_id, key_hash, algorithm)
-    }
-
-    /// Returns retained lifecycle entries in ascending sequence order.
-    pub fn get_signing_key_lifecycle(
-        env: Env,
-        issuer_id: BytesN<32>,
-        cursor: u64,
-        limit: u32,
-    ) -> Result<Vec<SigningKeyLifecycleRecord>, IssuerError> {
-        if limit > MAX_SIGNING_KEY_LIFECYCLE_PAGE {
-            return Err(IssuerError::BatchTooLarge);
-        }
-        let latest = Self::get_signing_key_usage_sequence(env.clone(), issuer_id.clone());
-        let oldest = latest.saturating_sub(u64::from(
-            SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY.saturating_sub(1),
-        ));
-        let mut sequence = cursor.max(1).max(oldest);
-        let mut records = Vec::new(&env);
-        while sequence <= latest && records.len() < limit {
-            let slot = ((sequence - 1) % u64::from(SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY)) as u32;
-            let key = DataKey::SigningKeyLifecycleHistory(issuer_id.clone(), slot);
-            if let Some(record) = env
-                .storage()
-                .persistent()
-                .get::<_, SigningKeyLifecycleRecord>(&key)
-            {
-                if record.sequence == sequence {
-                    records.push_back(record);
-                    Self::extend_issuer_key_ttl(env.clone(), &key);
-                }
-            }
-            if sequence == latest {
-                break;
-            }
-            sequence += 1;
     ) -> Option<CompromisedSigningKeyRecord> {
         env.storage()
             .persistent()
@@ -3006,13 +3008,10 @@ mod test {
 
     use super::{DataKey, IssuerRegistryContract, IssuerRegistryContractClient};
     use earnproof_shared::{
-        ContractError, GovernanceRole, GovernanceRoleState, IssuerError, IssuerQueryStatus,
-        IssuerStatus, IssuerStatusResult, MAX_ISSUER_STATUS_BATCH, TTL_THRESHOLD_LEDGERS,
-        AdminTransferState, ContractError, IssuerError, IssuerQueryStatus, IssuerStatus,
-        IssuerStatusResult, ADMIN_TRANSFER_EXPIRY_LEDGERS, MAX_ISSUER_STATUS_BATCH,
-        ContractError, IssuerError, IssuerQueryStatus, IssuerRevocationState, IssuerStatus,
-        IssuerStatusResult, ISSUER_REVOCATION_TOMBSTONE_VERSION, MAX_ISSUER_STATUS_BATCH,
-        TTL_THRESHOLD_LEDGERS,
+        AdminTransferState, ContractError, GovernanceRole, GovernanceRoleState, IssuerError,
+        IssuerQueryStatus, IssuerRevocationState, IssuerStatus, IssuerStatusResult,
+        ADMIN_TRANSFER_EXPIRY_LEDGERS, ISSUER_REVOCATION_TOMBSTONE_VERSION,
+        MAX_ISSUER_STATUS_BATCH, TTL_THRESHOLD_LEDGERS,
     };
     use soroban_sdk::{
         testutils::{

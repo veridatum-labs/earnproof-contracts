@@ -114,6 +114,8 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 210 | `ReactivationCooldownActive` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
 | 211 | `InvalidMetadataCommitment` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
 | 212 | `BatchTooLarge` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
+| 213 | `InvalidAssuranceLevel` | `IssuerError` | issuer-registry | returned | after-caller-change | 400 |
+| 214 | `SequenceOverflow` | `IssuerError` | issuer-registry | returned | after-operator-action | 409 |
 | 300 | `ProofAlreadyRegistered` | `ProofError` | proof-registry | returned | never | 409 |
 | 301 | `ProofNotFound` | `ProofError` | proof-registry | returned | after-caller-change | 404 |
 | 302 | `ProofAlreadyRevoked` | `ProofError` | proof-registry | returned | never | 400 |
@@ -141,8 +143,15 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 | 324 | `TooManySuccessors` | `ProofError` | proof-registry | returned | never | 400 |
 | 325 | `DisputeFilingWindowClosed` | `ProofError` | proof-registry | returned | never | 400 |
 | 326 | `UnsupportedNullifierDomain` | `ProofError` | proof-registry | returned | after-operator-action | 400 |
+| 327 | `ConsentReceiptAlreadyCommitted` | `ProofError` | proof-registry | returned | never | 409 |
+| 328 | `ConsentAlreadyWithdrawn` | `ProofError` | proof-registry | returned | never | 409 |
+| 329 | `ConsentWithdrawn` | `ProofError` | proof-registry | returned | never | 409 |
+| 330 | `StaleConsentWithdrawalSequence` | `ProofError` | proof-registry | returned | after-caller-change | 409 |
+| 331 | `InvalidConsentWithdrawalReason` | `ProofError` | proof-registry | returned | never | 400 |
+| 332 | `UnsupportedEventDomain` | `ProofError` | proof-registry | returned | never | 400 |
 
 ## Details
+
 ### 1 - `AlreadyInitialized`
 
 - Enum: `ContractError`
@@ -528,6 +537,28 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Suggested HTTP status: 400
 - Client message: "Request batch is too large"
 
+### 213 - `InvalidAssuranceLevel`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: An issuer assurance change used an unsupported commitment version or a tier outside the documented 1-255 range.
+- Remediation: Use commitment version 1 and a public assurance tier from 1 through 255.
+- Suggested HTTP status: 400
+- Client message: "Invalid issuer assurance level"
+
+### 214 - `SequenceOverflow`
+
+- Enum: `IssuerError`
+- Domain: issuer-registry
+- Status: returned
+- Retry: after-operator-action
+- Cause: A per-issuer monotonic sequence reached its maximum value and cannot advance.
+- Remediation: Do not retry the transition unchanged. Governance must migrate the sequence representation before another lifecycle change.
+- Suggested HTTP status: 409
+- Client message: "Issuer sequence cannot advance"
+
 ### 300 - `ProofAlreadyRegistered`
 
 - Enum: `ProofError`
@@ -810,7 +841,7 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Status: returned
 - Retry: never
 - Cause: The governed dispute filing window has not opened, has closed, or its lifecycle anchor is unavailable.
-- Remediation: Read `get_dispute_filing_eligibility` before filing and do not replay a request outside its reported half-open window.
+- Remediation: Read get_dispute_filing_eligibility before filing and do not replay a request outside its reported half-open window.
 - Suggested HTTP status: 400
 - Client message: "Dispute filing window is closed"
 
@@ -821,8 +852,74 @@ A Soroban contract error is a type and a number. It carries no message, no paylo
 - Status: returned
 - Retry: after-operator-action
 - Cause: The proof supplied a subject-nullifier domain version that protocol governance does not support.
-- Remediation: Query `get_nullifier_domain_versions` and submit a nullifier derived under a currently supported version.
+- Remediation: Query get_nullifier_domain_versions and submit a nullifier derived under a currently supported version.
 - Suggested HTTP status: 400
 - Client message: "Unsupported nullifier domain version"
+
+### 327 - `ConsentReceiptAlreadyCommitted`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The same disclosure-consent receipt commitment was already recorded for this proof, policy, receipt version, and receipt hash.
+- Remediation: Treat the receipt as already anchored. Query has_consent_receipt_commitment instead of replaying the commit.
+- Suggested HTTP status: 409
+- Client message: "Consent receipt is already committed"
+
+### 328 - `ConsentAlreadyWithdrawn`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: Consent for this proof and policy was already withdrawn; a withdrawal is final and recorded once.
+- Remediation: Treat consent as withdrawn. Query is_consent_withdrawn instead of resubmitting.
+- Suggested HTTP status: 409
+- Client message: "Consent is already withdrawn"
+
+### 329 - `ConsentWithdrawn`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: A disclosure-consent receipt cannot be committed because consent for this proof and policy was withdrawn.
+- Remediation: Do not anchor new receipts for this pair. A new proof or policy hash is required for fresh consent.
+- Suggested HTTP status: 409
+- Client message: "Consent has been withdrawn"
+
+### 330 - `StaleConsentWithdrawalSequence`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: after-caller-change
+- Cause: The expected withdrawal sequence does not match the next sequence, so the request was replayed or raced by another withdrawal.
+- Remediation: Re-read get_consent_withdrawal_count, then resubmit with the next sequence if the withdrawal is still needed.
+- Suggested HTTP status: 409
+- Client message: "Withdrawal request is out of date"
+
+### 331 - `InvalidConsentWithdrawalReason`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The withdrawal reason code is outside the published version-1 range 1 to 4.
+- Remediation: Use a published reason code. Reason text is never accepted on chain.
+- Suggested HTTP status: 400
+- Client message: "Withdrawal reason is not valid"
+
+### 332 - `UnsupportedEventDomain`
+
+- Enum: `ProofError`
+- Domain: proof-registry
+- Status: returned
+- Retry: never
+- Cause: The contract does not report a sequence range for the requested event domain.
+- Remediation: Query the domain on the contract that emits it: config-change and pause acknowledgements on protocol-config, consent withdrawals on proof-registry.
+- Suggested HTTP status: 400
+- Client message: "Event domain is not supported"
 
 <!-- END GENERATED -->

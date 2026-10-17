@@ -486,7 +486,7 @@ impl InterfaceVersion {
 pub const ISSUER_REGISTRY_INTERFACE_VERSION: InterfaceVersion = InterfaceVersion::new(1, 1, 0);
 
 /// The interface version implemented by `protocol-config`.
-pub const PROTOCOL_CONFIG_INTERFACE_VERSION: InterfaceVersion = InterfaceVersion::new(1, 2, 0);
+pub const PROTOCOL_CONFIG_INTERFACE_VERSION: InterfaceVersion = InterfaceVersion::new(1, 3, 0);
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -793,6 +793,21 @@ pub enum ProofError {
     /// The requested subject-nullifier domain version is not currently
     /// supported by protocol governance.
     UnsupportedNullifierDomain = 326,
+    /// The same disclosure-consent receipt commitment was already recorded.
+    ConsentReceiptAlreadyCommitted = 327,
+    /// Consent for this proof and policy was already withdrawn. Withdrawal is
+    /// terminal, so the same request must not be replayed.
+    ConsentAlreadyWithdrawn = 328,
+    /// A new disclosure receipt was refused because consent for this proof and
+    /// policy has been withdrawn. Receipts committed earlier are unaffected.
+    ConsentWithdrawn = 329,
+    /// The caller's expected withdrawal sequence is not the registry's next
+    /// sequence, so the caller acted on stale state.
+    StaleConsentWithdrawalSequence = 330,
+    /// The withdrawal reason code is not a published version-1 code.
+    InvalidConsentWithdrawalReason = 331,
+    /// The requested event domain is not reported by this contract.
+    UnsupportedEventDomain = 332,
 }
 
 /// Versioned asset identifier accepted by context-aware proof registration.
@@ -1048,9 +1063,10 @@ pub enum ConfigChangeCategory {
     SchemaRateLimit,
     CommitmentAlgorithmPolicy,
     ApprovalPolicyUpdate,
-    EmergencyPolicyUpdate,
     DisputeFilingPolicy,
     NullifierDomainPolicy,
+    EmergencyPolicyUpdate,
+    HistoryRetention,
 }
 
 /// Category of a protocol mutation that may require threshold approval.
@@ -1340,6 +1356,233 @@ pub struct PauseAcknowledgementRecord {
 
 pub const MAX_PAUSE_ACKNOWLEDGEMENT_HISTORY_PAGE: u32 = 20;
 
+// ── governed history retention (issue #298) ────────────────────────────────
+
+/// Encoding version of [`HistoryRetention`] and [`HistoryRetentionState`].
+pub const HISTORY_RETENTION_VERSION: u32 = 1;
+/// Protocol minimum number of change-history entries governance may retain.
+pub const CONFIG_HISTORY_MIN_RETENTION: u32 = 8;
+/// Protocol minimum number of pause acknowledgements governance may retain.
+pub const PAUSE_ACKNOWLEDGEMENT_MIN_RETENTION: u32 = 16;
+/// Protocol maximum number of pause acknowledgements governance may retain.
+/// This is also the default, so a deployment that never configures retention
+/// keeps its full audit trail up to the maximum.
+pub const PAUSE_ACKNOWLEDGEMENT_MAX_RETENTION: u32 = 1_024;
+/// Maximum number of expired history entries physically removed by one call.
+/// Entries beyond the retention window stay hidden from queries immediately;
+/// the remainder is removed by later appends, so no call does unbounded work.
+pub const HISTORY_RETENTION_PRUNE_BATCH: u32 = 8;
+
+/// Bounded histories whose retention is governed by protocol-config.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum HistoryKind {
+    /// The change-history ring read by `get_config_history`.
+    ConfigChange,
+    /// The pause acknowledgement log read by `get_pause_acknowledgements`.
+    PauseAcknowledgement,
+}
+
+impl HistoryKind {
+    /// Smallest cap governance may set. Guarantees a minimum audit trail.
+    pub const fn min_retention(self) -> u32 {
+        match self {
+            HistoryKind::ConfigChange => CONFIG_HISTORY_MIN_RETENTION,
+            HistoryKind::PauseAcknowledgement => PAUSE_ACKNOWLEDGEMENT_MIN_RETENTION,
+        }
+    }
+
+    /// Largest cap governance may set. For the config-change ring this is the
+    /// physical ring capacity, which keeps the slot layout unchanged.
+    pub const fn max_retention(self) -> u32 {
+        match self {
+            HistoryKind::ConfigChange => CONFIG_HISTORY_CAPACITY,
+            HistoryKind::PauseAcknowledgement => PAUSE_ACKNOWLEDGEMENT_MAX_RETENTION,
+        }
+    }
+
+    /// Cap in force before governance configures one.
+    pub const fn default_retention(self) -> u32 {
+        self.max_retention()
+    }
+}
+
+/// Stored retention state for one history. `pruned_to` is the lowest sequence
+/// that may still be physically present and never decreases, so raising a cap
+/// cannot resurrect an entry that was already removed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryRetentionState {
+    pub max_entries: u32,
+    pub pruned_to: u32,
+    pub revision: u32,
+}
+
+/// Public view of one history's retention policy and current window.
+/// Sequences are zero-based absolute indexes; the retained window is the
+/// half-open range `[oldest_retained, next_sequence)`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryRetention {
+    pub version: u32,
+    pub kind: HistoryKind,
+    pub max_entries: u32,
+    pub min_allowed: u32,
+    pub max_allowed: u32,
+    pub revision: u32,
+    pub oldest_retained: u32,
+    pub next_sequence: u32,
+}
+
+/// Oldest sequence still retained by a history. The window is the newest
+/// `max_entries` sequences, never reaching below the physical `pruned_to`
+/// watermark. All arithmetic saturates so an empty or short history is valid.
+pub const fn oldest_retained_sequence(next_sequence: u32, max_entries: u32, pruned_to: u32) -> u32 {
+    let windowed = next_sequence.saturating_sub(max_entries);
+    if windowed > pruned_to {
+        windowed
+    } else {
+        pruned_to
+    }
+}
+
+// ── event sequence checkpoint ranges (issue #299) ──────────────────────────
+
+/// Encoding version of [`EventSequenceRange`].
+pub const EVENT_RANGE_VERSION: u32 = 1;
+/// Spacing between reported checkpoint sequences.
+pub const EVENT_CHECKPOINT_INTERVAL: u64 = 16;
+
+/// Event domains for which a contract reports a sequence range. Every event
+/// in a domain advances that domain's sequence by exactly one, in the same
+/// transaction, so a rolled-back transaction advances nothing.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum EventDomain {
+    /// protocol-config: entries of the change history.
+    ConfigChange,
+    /// protocol-config and proof-registry: pause acknowledgements.
+    PauseAcknowledgement,
+    /// proof-registry: disclosure consent withdrawals.
+    ConsentWithdrawal,
+}
+
+/// Contract-reported sequence range for one event domain. Sequences are
+/// one-based: sequence `n` is the n-th event ever emitted in the domain.
+///
+/// * `latest_emitted` is `0` until the first event commits.
+/// * `first_retained` is the lowest sequence whose backing record is still
+///   queryable from contract state, or `0` while the domain is empty.
+/// * `checkpoint` is `latest_emitted` rounded down to a multiple of
+///   [`EVENT_CHECKPOINT_INTERVAL`], giving indexers fixed anchors to compare.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventSequenceRange {
+    pub version: u32,
+    pub domain: EventDomain,
+    pub first_retained: u64,
+    pub latest_emitted: u64,
+    pub checkpoint: u64,
+}
+
+/// Checkpoint sequence for `latest_emitted`.
+pub const fn event_checkpoint(latest_emitted: u64) -> u64 {
+    latest_emitted - latest_emitted % EVENT_CHECKPOINT_INTERVAL
+}
+
+// ── disclosure consent withdrawal records (issue #301) ─────────────────────
+
+/// Encoding version of [`ConsentWithdrawalRecord`] and its commitment.
+pub const CONSENT_WITHDRAWAL_VERSION: u32 = 1;
+/// The subject asked for consent to be withdrawn.
+pub const CONSENT_WITHDRAWAL_REASON_SUBJECT_REQUEST: u32 = 1;
+/// The disclosure policy changed and the earlier consent no longer applies.
+pub const CONSENT_WITHDRAWAL_REASON_POLICY_CHANGE: u32 = 2;
+/// The issuer withdrew consent on the subject's behalf.
+pub const CONSENT_WITHDRAWAL_REASON_ISSUER_ACTION: u32 = 3;
+/// Consent expired by agreement with the subject.
+pub const CONSENT_WITHDRAWAL_REASON_EXPIRED: u32 = 4;
+/// Largest published version-1 reason code.
+pub const MAX_CONSENT_WITHDRAWAL_REASON: u32 = 4;
+/// Maximum number of withdrawal records returned by one query.
+pub const MAX_CONSENT_WITHDRAWAL_PAGE: u32 = 20;
+
+/// Immutable, hash-only record that future disclosure consent for one proof
+/// and policy was withdrawn. It carries a coded reason, never reason text.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConsentWithdrawalRecord {
+    pub record_version: u32,
+    pub sequence: u64,
+    pub proof_id_hash: BytesN<32>,
+    pub policy_hash: BytesN<32>,
+    pub reason_code: u32,
+    pub commitment_hash: BytesN<32>,
+    pub effective_ledger: u32,
+}
+
+/// Canonical, network- and registry-scoped consent withdrawal commitment.
+///
+/// The XDR-encoded tuple is, in order: version `1_u32`, the
+/// `earnproof_consent_withdrawal` domain separator, network id, registry
+/// address, proof id hash, policy hash, withdrawal sequence, reason code, and
+/// the caller's secret-salted `withdrawal_hash`.
+#[allow(clippy::too_many_arguments)]
+pub fn consent_withdrawal_commitment(
+    env: &Env,
+    network_id: &BytesN<32>,
+    registry_address: &Address,
+    proof_id_hash: &BytesN<32>,
+    policy_hash: &BytesN<32>,
+    sequence: u64,
+    reason_code: u32,
+    withdrawal_hash: &BytesN<32>,
+) -> BytesN<32> {
+    let payload = (
+        CONSENT_WITHDRAWAL_VERSION,
+        Symbol::new(env, "earnproof_consent_withdrawal"),
+        network_id.clone(),
+        registry_address.clone(),
+        proof_id_hash.clone(),
+        policy_hash.clone(),
+        sequence,
+        reason_code,
+        withdrawal_hash.clone(),
+    )
+        .to_xdr(env);
+    env.crypto().sha256(&payload).to_bytes()
+}
+
+// ── proof policy version summaries (issue #300) ────────────────────────────
+
+/// Encoding version of [`ProofPolicyVersions`].
+pub const PROOF_POLICY_VERSIONS_VERSION: u32 = 1;
+/// Issuer policy commitment encoding version bound to new proofs. Matches the
+/// only `IssuerPolicyCommitments::encoding_version` the issuer registry accepts.
+pub const ISSUER_POLICY_ENCODING_VERSION: u32 = 1;
+
+/// Compact, immutable summary of every policy version bound to a proof when
+/// it was issued. It contains versions and the proof-type identifier only, so
+/// it can never expose a private claim. `nullifier_domain_version` is `0` when
+/// the proof was issued without a subject nullifier.
+///
+/// `legacy` is `true` for proofs registered before the summary was recorded:
+/// their schema version, proof type, and nullifier domain are read from the
+/// immutable proof record and the remaining versions are reported as `0`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofPolicyVersions {
+    pub record_version: u32,
+    pub schema_version: u32,
+    pub proof_type: Option<BytesN<32>>,
+    pub issuer_policy_version: u32,
+    pub commitment_algorithm: u32,
+    pub nullifier_domain_version: u32,
+    pub config_digest_version: u32,
+    pub bound_ledger: u32,
+    pub legacy: bool,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IssuerStatus {
@@ -1476,6 +1719,23 @@ pub struct SigningKeyCommitment {
     pub activated_ledger: u32,
 }
 
+/// Immutable, privacy-safe evidence that an issuer signing-key commitment was
+/// declared compromised. Raw public or private key material is never stored.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompromisedSigningKeyRecord {
+    pub record_version: u32,
+    pub issuer_id_hash: BytesN<32>,
+    pub key_hash: BytesN<32>,
+    pub algorithm: u32,
+    pub effective_ledger: u32,
+    pub reason_hash: BytesN<32>,
+    pub sequence: u32,
+}
+
+/// Maximum number of compromised-key records returned by one history query.
+pub const MAX_SIGNING_KEY_COMPROMISE_HISTORY_PAGE: u32 = 20;
+
 /// Number of most-recent key lifecycle transitions retained per issuer.
 pub const SIGNING_KEY_LIFECYCLE_HISTORY_CAPACITY: u32 = 32;
 /// Maximum lifecycle transitions returned by one query.
@@ -1507,23 +1767,6 @@ pub struct SigningKeyLifecycleRecord {
     pub sequence: u64,
     pub effective_ledger: u32,
 }
-
-/// Immutable, privacy-safe evidence that an issuer signing-key commitment was
-/// declared compromised. Raw public or private key material is never stored.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompromisedSigningKeyRecord {
-    pub record_version: u32,
-    pub issuer_id_hash: BytesN<32>,
-    pub key_hash: BytesN<32>,
-    pub algorithm: u32,
-    pub effective_ledger: u32,
-    pub reason_hash: BytesN<32>,
-    pub sequence: u32,
-}
-
-/// Maximum number of compromised-key records returned by one history query.
-pub const MAX_SIGNING_KEY_COMPROMISE_HISTORY_PAGE: u32 = 20;
 
 /// Versioned opaque commitments for issuer classification policy documents.
 #[contracttype]
@@ -2326,6 +2569,55 @@ mod signing_key_sequence_tests {
         );
         assert_eq!(checked_signing_key_sequence(u64::MAX - 1, 2), None);
         assert_eq!(checked_signing_key_sequence(u64::MAX, 1), None);
+    }
+}
+
+#[cfg(test)]
+mod retention_range_consent_tests {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+
+    #[test]
+    fn oldest_retained_sequence_saturates_and_respects_the_watermark() {
+        assert_eq!(oldest_retained_sequence(0, 8, 0), 0);
+        assert_eq!(oldest_retained_sequence(5, 8, 0), 0);
+        assert_eq!(oldest_retained_sequence(40, 32, 0), 8);
+        assert_eq!(oldest_retained_sequence(40, 32, 20), 20);
+        assert_eq!(oldest_retained_sequence(u32::MAX, 8, 0), u32::MAX - 8);
+    }
+
+    #[test]
+    fn event_checkpoint_rounds_down_to_the_interval() {
+        assert_eq!(event_checkpoint(0), 0);
+        assert_eq!(event_checkpoint(15), 0);
+        assert_eq!(event_checkpoint(16), 16);
+        assert_eq!(event_checkpoint(33), 32);
+        assert_eq!(event_checkpoint(u64::MAX) % EVENT_CHECKPOINT_INTERVAL, 0);
+    }
+
+    #[test]
+    fn consent_withdrawal_commitment_binds_every_input() {
+        let env = Env::default();
+        let h = |v: u8| BytesN::from_array(&env, &[v; 32]);
+        let registry = Address::generate(&env);
+        let other_registry = Address::generate(&env);
+        let base = consent_withdrawal_commitment(&env, &h(1), &registry, &h(2), &h(3), 1, 1, &h(4));
+        assert_eq!(
+            base,
+            consent_withdrawal_commitment(&env, &h(1), &registry, &h(2), &h(3), 1, 1, &h(4))
+        );
+        let variants = [
+            consent_withdrawal_commitment(&env, &h(9), &registry, &h(2), &h(3), 1, 1, &h(4)),
+            consent_withdrawal_commitment(&env, &h(1), &other_registry, &h(2), &h(3), 1, 1, &h(4)),
+            consent_withdrawal_commitment(&env, &h(1), &registry, &h(9), &h(3), 1, 1, &h(4)),
+            consent_withdrawal_commitment(&env, &h(1), &registry, &h(2), &h(9), 1, 1, &h(4)),
+            consent_withdrawal_commitment(&env, &h(1), &registry, &h(2), &h(3), 2, 1, &h(4)),
+            consent_withdrawal_commitment(&env, &h(1), &registry, &h(2), &h(3), 1, 2, &h(4)),
+            consent_withdrawal_commitment(&env, &h(1), &registry, &h(2), &h(3), 1, 1, &h(9)),
+        ];
+        for variant in variants {
+            assert_ne!(base, variant);
+        }
     }
 }
 

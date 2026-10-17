@@ -208,7 +208,7 @@ fn a_rotated_out_issuer_address_loses_issuer_status() {
     assert!(
         deployment
             .proofs
-            .try_register_proof_with_type_identifier(
+            .try_register_proof_typed(
                 &proof_id,
                 &commitment,
                 &old,
@@ -240,7 +240,7 @@ fn a_rotated_out_issuer_address_loses_issuer_status() {
     assert!(
         deployment
             .proofs
-            .try_register_proof_with_type_identifier(
+            .try_register_proof_typed(
                 &proof_id,
                 &commitment,
                 &replacement,
@@ -335,6 +335,12 @@ fn rotating_the_config_admin_does_not_move_registry_authority() {
     assert!(deployment
         .issuers
         .try_suspend_issuer(
+            &soroban_sdk::BytesN::from_array(&deployment.env, &{
+                let mut a = [0xA5u8; 32];
+                a[1] = 2;
+                a[2] = 0;
+                a
+            }),
             &deployment.issuer_id,
             &soroban_sdk::BytesN::from_array(&deployment.env, &[1u8; 32])
         )

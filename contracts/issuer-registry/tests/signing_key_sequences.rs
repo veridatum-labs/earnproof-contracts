@@ -86,7 +86,7 @@ fn compromise_is_terminal_and_failed_transitions_do_not_advance() {
     assert_eq!(client.get_signing_key_usage_sequence(&issuer_id), 0);
 
     client.propose_issuer_signing_key(&issuer_id, &key_hash, &1);
-    let compromised = client.mark_signing_key_compromised(&issuer_id, &key_hash, &1);
+    let compromised = client.record_signing_key_compromise(&issuer_id, &key_hash, &1);
     assert_eq!(compromised.sequence, 2);
     assert_eq!(
         compromised.transition,
@@ -111,7 +111,7 @@ fn lifecycle_queries_are_bounded_and_retirement_is_admin_only() {
     let (env, client, _admin, issuer_id) = setup();
     let key_hash = hash(&env, 30);
     assert_eq!(
-        client.try_mark_signing_key_compromised(&issuer_id, &key_hash, &1),
+        client.try_record_signing_key_compromise(&issuer_id, &key_hash, &1),
         Err(Ok(IssuerError::InvalidTransition))
     );
     assert_eq!(client.get_signing_key_usage_sequence(&issuer_id), 0);

@@ -244,3 +244,13 @@ that produced them; `Deployment::capture` in
 reason. A test that performs several operations and inspects the stream
 afterwards will see only the last one — and would pass vacuously while appearing
 to check a sequence.
+
+### Events added with retention bounds and consent withdrawal
+
+| Topic | Contract | Payload |
+|---|---|---|
+| `history_retention_set` | protocol-config | `kind`, `previous_max_entries`, `max_entries`, `revision`, `oldest_retained`, `changed_by` |
+| `consent_withdrawn` | proof-registry | `proof_id_hash`, `policy_hash`, `sequence`, `reason_code`, `commitment_hash` |
+
+Both are additive. See [history-retention-and-event-ranges.md](history-retention-and-event-ranges.md)
+and [consent-receipts.md](consent-receipts.md).

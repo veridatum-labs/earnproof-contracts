@@ -12,12 +12,14 @@
 
 use super::support::{
     active_issuer_count_key, address_issuer_key, address_ttl_key, admin_key, bytes32,
-    config_history_ring_key, config_history_total_key, config_version_key, contract_version_key,
-    deployment, encoded, encoded_keys_in, genesis_key, instance_live_until_key,
-    issuer_active_proof_count_key, issuer_epoch_key, issuer_index_count_key, issuer_index_key,
-    issuer_key, issuer_lifetime_proof_count_key, issuer_registry_key,
-    issuer_revocation_tombstone_key, issuer_ttl_key, max_active_issuers_key, paused_key,
-    proof_context_key, proof_key, proof_policy_key, proof_subject_nullifier_key,
+    config_history_ring_key, config_history_total_key, config_version_key, consent_receipt_key,
+    consent_withdrawal_count_key, consent_withdrawal_index_key, consent_withdrawal_key,
+    contract_version_key, deployment, encoded, encoded_keys_in, exercised_deployment, genesis_key,
+    history_retention_key, instance_live_until_key, issuer_active_proof_count_key,
+    issuer_epoch_key, issuer_index_count_key, issuer_index_key, issuer_key,
+    issuer_lifetime_proof_count_key, issuer_registry_key, issuer_revocation_tombstone_key,
+    issuer_ttl_key, max_active_issuers_key, paused_key, proof_context_key, proof_key,
+    proof_policy_key, proof_policy_versions_key, proof_subject_nullifier_key,
     proof_subject_pseudonym_key, proof_ttl_key, proof_type_approved_key, protocol_config_key,
     reactivatable_at_key, reactivation_cooldown_key, registry_epoch_key, schema_predecessor_key,
     schema_rate_usage_key, schema_version_index_count_key, schema_version_index_key,
@@ -434,5 +436,30 @@ fn consent_receipt_key_reconstructs_the_hash_only_index() {
     assert!(
         encoded_keys_in(env, &deployment.proofs_id, StorageClass::Persistent)
             .contains(&encoded(env, consent_receipt_key(env, &commitment_hash)))
+    );
+}
+
+#[test]
+fn consent_withdrawal_and_policy_version_keys_reconstruct() {
+    let deployment = exercised_deployment();
+    let env = &deployment.env;
+    let proofs = &deployment.proofs_id;
+    let persistent = encoded_keys_in(env, proofs, StorageClass::Persistent);
+    assert!(persistent.contains(&encoded(env, consent_withdrawal_key(env, 1))));
+    assert!(persistent.contains(&encoded(
+        env,
+        consent_withdrawal_index_key(env, &deployment.proof_id, &bytes32(env, 40))
+    )));
+    assert!(persistent.contains(&encoded(
+        env,
+        proof_policy_versions_key(env, &deployment.proof_id)
+    )));
+    assert!(encoded_keys_in(env, proofs, StorageClass::Instance)
+        .contains(&encoded(env, consent_withdrawal_count_key(env))));
+    assert!(
+        encoded_keys_in(env, &deployment.config_id, StorageClass::Persistent).contains(&encoded(
+            env,
+            history_retention_key(env, earnproof_shared::HistoryKind::ConfigChange)
+        ))
     );
 }

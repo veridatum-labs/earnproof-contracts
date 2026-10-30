@@ -5,7 +5,19 @@ on:
     branches: [develop]
 
 jobs:
+  malware-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Scan without installing dependencies
+        run: python3 scripts/security/scan_malware.py
+
   documentation:
+    needs: malware-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,6 +27,7 @@ jobs:
         run: python3 scripts/generate-reference.py --check
 
   contracts:
+    needs: malware-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +42,7 @@ jobs:
       - run: cargo build --workspace
 
   schema-validation:
+    needs: malware-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +55,7 @@ jobs:
             --all-errors
 
   coverage:
+    needs: malware-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +84,7 @@ jobs:
           retention-days: 30
 
   resource-budgets:
+    needs: malware-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +94,7 @@ jobs:
         run: cargo test -p resource-budget-tests --release
 
   fuzz:
+    needs: malware-scan
     runs-on: ubuntu-latest
     env:
       RUSTUP_TOOLCHAIN: nightly

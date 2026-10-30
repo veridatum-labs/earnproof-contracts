@@ -1,0 +1,12 @@
+# Security-sensitive repository automation and executable configuration.
+/.github/ @Hallab7
+/.githooks/ @Hallab7
+**/.vscode/ @Hallab7
+**/Cargo.toml @Hallab7
+**/Cargo.lock @Hallab7
+/.cargo/ @Hallab7
+/scripts/security/ @Hallab7
+**/package.json @Hallab7
+**/package-lock.json @Hallab7
+**/public/fonts/ @Hallab7
+**/*config.* @Hallab7

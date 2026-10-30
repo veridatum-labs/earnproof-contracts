@@ -7,6 +7,16 @@ if [ -z "$staged_files" ]; then
   exit 0
 fi
 
+echo "pre-commit: scanning for known malware indicators..."
+if python3 --version >/dev/null 2>&1; then
+  python3 scripts/security/scan_malware.py
+elif python --version >/dev/null 2>&1; then
+  python scripts/security/scan_malware.py
+else
+  echo "pre-commit: Python 3 is required for the malware scan." >&2
+  exit 1
+fi
+
 if ! printf '%s\n' "$staged_files" | grep -Eq '(Cargo\.lock|Cargo\.toml|\.rs)$'; then
   echo "pre-commit: no Rust code or Cargo configuration changes; skipping tests."
   exit 0

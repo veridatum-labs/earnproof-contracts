@@ -43,3 +43,6 @@ mod enumeration;
 
 #[cfg(test)]
 mod probe;
+
+#[cfg(test)]
+mod scope_authorization_matrix;

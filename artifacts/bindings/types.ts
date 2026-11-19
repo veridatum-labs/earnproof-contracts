@@ -88,6 +88,76 @@ export interface SchemaPolicy {
   max_validity_seconds: bigint;
 }
 
+/**
+ * PauseScope enumeration.
+ * Defines the scope boundaries for emergency pause operations.
+ * Each scope can be paused independently without affecting others.
+ */
+export enum PauseScope {
+  Global = "Global",
+  Registration = "Registration",
+  Updates = "Updates",
+  Revocation = "Revocation",
+  Upgrades = "Upgrades",
+  Disputes = "Disputes",
+}
+
+/**
+ * PauseAcknowledgementRole enumeration.
+ * Defines the operational role of an entity acknowledging a pause.
+ */
+export enum PauseAcknowledgementRole {
+  Administrator = "Administrator",
+  IncidentOperator = "IncidentOperator",
+}
+
+/**
+ * PauseAcknowledgementRecord interface.
+ * Immutable commitment-only evidence that an authorized operator reviewed an active pause.
+ */
+export interface PauseAcknowledgementRecord {
+  record_version: number; // u32
+  sequence: number; // u32
+  scope: PauseScope;
+  acknowledgement_hash: string; // BytesN<32> as hex string
+  acknowledged_by: string; // Address
+  role: PauseAcknowledgementRole;
+  acknowledged_at_ledger: number; // u32
+}
+
+/**
+ * EmergencyAction enumeration.
+ * Defines the types of emergency actions that can be proposed and executed.
+ */
+export type EmergencyAction =
+  | { tag: "GlobalPause" }
+  | { tag: "ScopedPause"; value: PauseScope };
+
+/**
+ * EmergencyFastTrackPolicy interface.
+ * Policy configuration for emergency action governance.
+ */
+export interface EmergencyFastTrackPolicy {
+  enabled: boolean;
+  threshold: number; // u32 - number of approvals required
+  max_lifetime_ledgers: number; // u32 - maximum ledger lifespan for a proposal
+  guardians: string[]; // Address[] - current authorized guardians
+}
+
+/**
+ * EmergencyActionProposal interface.
+ * Represents a proposed emergency action awaiting approval.
+ */
+export interface EmergencyActionProposal {
+  action: EmergencyAction;
+  reason_commitment: string; // BytesN<32> as hex string
+  policy: EmergencyFastTrackPolicy;
+  proposer: string; // Address
+  approvals: string[]; // Address[] - guardians who approved
+  created_at: number; // u32 - ledger sequence
+  expires_at: number; // u32 - ledger sequence
+}
+
 // ── Protocol Config Contract Types ───────────────────────────
 
 /**
@@ -284,6 +354,108 @@ export interface GetConfigVersionParams {
  * Return type: u32
  */
 export type GetConfigVersionResult = number;
+
+/**
+ * Parameters for protocol_config::set_scoped_pause
+ */
+export interface SetScopedPauseParams {
+  scope: PauseScope;
+  paused: boolean;
+}
+
+/**
+ * Return type: void
+ */
+export type SetScopedPauseResult = void;
+
+/**
+ * Parameters for protocol_config::is_scope_paused
+ */
+export interface IsScopePausedParams {
+  scope: PauseScope;
+}
+
+/**
+ * Return type: bool
+ */
+export type IsScopePausedResult = boolean;
+
+/**
+ * Parameters for protocol_config::propose_emergency_action
+ */
+export interface ProposeEmergencyActionParams {
+  action: EmergencyAction;
+  reason_commitment: string; // BytesN<32> as hex string
+  expires_at: number; // u32
+}
+
+/**
+ * Return type: BytesN<32> as hex string (proposal_id)
+ */
+export type ProposeEmergencyActionResult = string;
+
+/**
+ * Parameters for protocol_config::approve_emergency_action
+ */
+export interface ApproveEmergencyActionParams {
+  proposal_id: string; // BytesN<32> as hex string
+}
+
+/**
+ * Return type: void
+ */
+export type ApproveEmergencyActionResult = void;
+
+/**
+ * Parameters for protocol_config::execute_emergency_action
+ */
+export interface ExecuteEmergencyActionParams {
+  proposal_id: string; // BytesN<32> as hex string
+}
+
+/**
+ * Return type: void
+ */
+export type ExecuteEmergencyActionResult = void;
+
+/**
+ * Parameters for protocol_config::get_emergency_proposal
+ */
+export interface GetEmergencyProposalParams {
+  proposal_id: string; // BytesN<32> as hex string
+}
+
+/**
+ * Return type: Option<EmergencyActionProposal>
+ */
+export type GetEmergencyProposalResult = EmergencyActionProposal | null;
+
+/**
+ * Parameters for protocol_config::set_emergency_policy
+ */
+export interface SetEmergencyPolicyParams {
+  enabled: boolean;
+  threshold: number; // u32
+  max_lifetime_ledgers: number; // u32
+  guardians: string[]; // Address[]
+}
+
+/**
+ * Return type: void
+ */
+export type SetEmergencyPolicyResult = void;
+
+/**
+ * Parameters for protocol_config::get_emergency_policy
+ */
+export interface GetEmergencyPolicyParams {
+  // No parameters
+}
+
+/**
+ * Return type: EmergencyFastTrackPolicy
+ */
+export type GetEmergencyPolicyResult = EmergencyFastTrackPolicy;
 
 // ── Issuer Registry Contract Types ──────────────────────────
 
@@ -603,6 +775,30 @@ export interface GetProtocolConfigParams {
  * Return type: Address
  */
 export type GetProtocolConfigResult = string;
+
+/**
+ * Parameters for proof_registry::pause_scope
+ */
+export interface PauseScopeParams {
+  scope: PauseScope;
+}
+
+/**
+ * Return type: void
+ */
+export type PauseScopeResult = void;
+
+/**
+ * Parameters for proof_registry::unpause_scope
+ */
+export interface UnpauseScopeParams {
+  scope: PauseScope;
+}
+
+/**
+ * Return type: void
+ */
+export type UnpauseScopeResult = void;
 
 // ── Provenance ────────────────────────────────────────────────
 

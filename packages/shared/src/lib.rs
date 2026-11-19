@@ -199,6 +199,10 @@ pub struct SuccessorNominationRecord {
     pub earliest_activation_ledger: u32,
 }
 
+/// Monotonic epoch counter incremented each time a successor is activated.
+/// Prevents rollback by ensuring any state from a previous epoch is stale.
+pub const SUCCESSOR_EPOCH_MIN: u64 = 1;
+
 pub const QUERY_ENVELOPE_SCHEMA_VERSION: u32 = 1;
 
 /// Common metadata header identifying query context, contract, and network.
@@ -211,6 +215,7 @@ pub struct QueryEnvelopeHeader {
     pub ledger_sequence: u32,
     pub ledger_timestamp: u64,
     pub config_version: u32,
+    pub successor_epoch: u64,
 }
 
 /// Capacity query response envelope.
@@ -246,7 +251,7 @@ pub struct HistoryEnvelope {
     pub total_records: u32,
 }
 
-pub fn make_query_envelope_header(env: &Env, config_version: u32) -> QueryEnvelopeHeader {
+pub fn make_query_envelope_header(env: &Env, config_version: u32, successor_epoch: u64) -> QueryEnvelopeHeader {
     QueryEnvelopeHeader {
         schema_version: QUERY_ENVELOPE_SCHEMA_VERSION,
         contract_address: env.current_contract_address(),
@@ -254,6 +259,7 @@ pub fn make_query_envelope_header(env: &Env, config_version: u32) -> QueryEnvelo
         ledger_sequence: env.ledger().sequence(),
         ledger_timestamp: env.ledger().timestamp(),
         config_version,
+        successor_epoch,
     }
 }
 

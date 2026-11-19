@@ -121,6 +121,52 @@ single-shot and unreachable on a live deployment. Its rejection is asserted in
    attacker could reset the administrator without emitting a rotation event,
    which would be the quietest available privilege escalation.
 
+## Scope escalation prevention
+
+The scoped pause mechanism prevents emergency authorization from being reused
+beyond its documented scope commitment. The guarantees below are enforceable
+commitments, not operational best practices.
+
+### Scope isolation
+
+Each scope can be paused independently without affecting others:
+
+- **Registration**: Controls `proof-registry::register_proof` and
+  `proof-registry::register_proof_with_activation`
+- **Updates**: Controls `proof-registry::update_proof_hash` and related update operations
+- **Revocation**: Controls revocation-scoped operations (independent of global pause)
+- **Upgrades**: Controls upgrade and migration operations (independent of global pause)
+- **Disputes**: Controls dispute-related operations (independent of global pause)
+- **Global**: Fallback scope that automatically applies to Registration and Updates,
+  but does NOT automatically apply to Revocation, Upgrades, or Disputes
+
+### Scope commitment enforcement
+
+1. **Proposal validation**: An emergency action proposing `ScopedPause(PauseScope::Global)`
+   is rejected. Only `GlobalPause` or `ScopedPause(scope)` where `scope != Global` are valid.
+2. **Scope specificity**: A pause on one scope (e.g., Registration) does not pause
+   any other scope (e.g., Updates, Revocation). Each scope is independently gated.
+3. **Guardian role isolation**: A guardian approved to handle one scope cannot escalate
+   their authority to handle broader scopes through policy changes mid-incident.
+4. **Cross-contract consistency**: `proof-registry::pause_scope` and `proof-registry::unpause_scope`
+   enforce identical scope semantics to `protocol-config::set_scoped_pause`.
+5. **Fallback predictability**: Global pause covers only Registration and Updates scopes
+   (the two new-obligation scopes). Revocation, Upgrades, and Disputes remain
+   independently pausable and unpausable.
+
+### Scope enforcement at call time
+
+When an emergency action is executed:
+
+1. `execute_emergency_action` checks that the proposal's action is still valid
+2. For `GlobalPause`: Sets instance storage `is_paused = true`
+3. For `ScopedPause(scope)`: Sets persistent storage for that scope only,
+   does not modify other scopes or the global pause flag
+4. Authorization checks use `is_scope_paused(scope)` which:
+   - First checks if the specific scope is paused
+   - Falls back to global pause only for Registration and Updates scopes
+   - Returns false for Revocation, Upgrades, Disputes even if global pause is active
+
 ### Stranding
 
 `set_admin` accepts any address. The contract cannot verify that a successor is

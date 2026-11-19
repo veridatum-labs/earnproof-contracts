@@ -33,3 +33,6 @@ mod admin_rotation;
 
 #[cfg(test)]
 mod sequences;
+
+#[cfg(test)]
+mod scope_escalation_prevention;

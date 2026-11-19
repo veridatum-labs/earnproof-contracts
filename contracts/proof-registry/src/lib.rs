@@ -105,6 +105,9 @@ enum DataKey {
     Successor,
     SuccessorActivationDelay,
     SuccessorNomination,
+    /// Monotonic successor epoch counter; incremented on each successor activation.
+    /// Prevents rollback by binding state to a specific governance epoch.
+    SuccessorEpoch,
     MigrationCheckpoint,
     Decommissioned,
     /// Write-once deployment domain mixed into the deployment identity.
@@ -801,6 +804,9 @@ impl ProofRegistryContract {
         env.storage()
             .instance()
             .set(&DataKey::RegistryEpoch, &0_u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::SuccessorEpoch, &earnproof_shared::SUCCESSOR_EPOCH_MIN);
         let genesis = GenesisRecord {
             genesis_id: earnproof_shared::compute_genesis_id(&env, "earnproof_proof_registry"),
             initialized_at_ledger: env.ledger().sequence(),
@@ -8471,6 +8477,131 @@ mod test {
             client.try_reject_dispute(&proof_id),
             Err(Ok(ProofError::ProofNotFound))
         );
+    }
+
+    #[test]
+    fn revocation_queries_work_after_decommission() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let admin = Address::from_str(&env, ADMIN);
+        let proof_id = bytes(&env, 1);
+
+        // Register and revoke a proof
+        client.register_proof(
+            &proof_id,
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &None,
+            &bytes(&env, 1),
+        );
+        assert!(!client.is_revoked(&proof_id));
+
+        client.revoke_proof(&proof_id);
+        assert!(client.is_revoked(&proof_id));
+
+        // Decommission the contract
+        client.nominate_successor(&admin);
+        client.activate_successor();
+
+        // Revocation query should still work after decommission
+        assert!(client.is_revoked(&proof_id));
+
+        // get_proof should also work (for TTL preservation)
+        let proof = client.get_proof(&proof_id);
+        assert_eq!(proof.status, ProofStatus::Revoked);
+
+        // Validity should report revoked status
+        assert_eq!(client.get_proof_validity(&proof_id), ProofValidity::Revoked);
+    }
+
+    #[test]
+    fn proof_validity_reports_revoked_after_decommission() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let admin = Address::from_str(&env, ADMIN);
+        let proof_id = bytes(&env, 1);
+
+        client.register_proof(
+            &proof_id,
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &None,
+            &bytes(&env, 1),
+        );
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Active);
+
+        client.revoke_proof(&proof_id);
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Revoked);
+
+        // Decommission
+        client.nominate_successor(&admin);
+        client.activate_successor();
+
+        // Query should still work
+        assert_eq!(client.proof_validity(&proof_id), ProofValidity::Revoked);
+    }
+
+    #[test]
+    fn ttl_extension_works_for_revocation_data_after_decommission() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let admin = Address::from_str(&env, ADMIN);
+        let proof_id = bytes(&env, 1);
+
+        client.register_proof(
+            &proof_id,
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &2_000,
+            &None,
+            &bytes(&env, 1),
+        );
+
+        client.revoke_proof(&proof_id);
+        let ttl_before = client.get_proof_ttl_status(&proof_id);
+
+        // Decommission
+        client.nominate_successor(&admin);
+        client.activate_successor();
+
+        // Reading revocation data should extend TTL
+        let _ = client.get_proof(&proof_id);
+        let ttl_after = client.get_proof_ttl_status(&proof_id);
+
+        // TTL should be extended (not expired)
+        assert_eq!(ttl_after, TtlStatus::Live);
+    }
+
+    #[test]
+    fn archived_proofs_remain_queryable_after_decommission() {
+        let (env, client, ..) = setup();
+        let issuer = Address::from_str(&env, ISSUER);
+        let admin = Address::from_str(&env, ADMIN);
+        let proof_id = bytes(&env, 1);
+
+        client.register_proof(
+            &proof_id,
+            &bytes(&env, 2),
+            &issuer,
+            &1,
+            &100,  // Short expiration
+            &None,
+            &bytes(&env, 1),
+        );
+
+        client.revoke_proof(&proof_id);
+
+        // Decommission
+        client.nominate_successor(&admin);
+        client.activate_successor();
+
+        // Revocation should still be queryable
+        assert!(client.is_revoked(&proof_id));
     }
 
     #[test]

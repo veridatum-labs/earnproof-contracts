@@ -44,6 +44,9 @@ enum DataKey {
     Successor,
     SuccessorActivationDelay,
     SuccessorNomination,
+    /// Monotonic successor epoch counter; incremented on each successor activation.
+    /// Prevents rollback by binding state to a specific governance epoch.
+    SuccessorEpoch,
     MigrationCheckpoint,
     Decommissioned,
     /// Write-once deployment domain mixed into the deployment identity.
@@ -627,6 +630,9 @@ impl IssuerRegistryContract {
         env.storage().instance().set(&DataKey::IssuerEpoch, &0_u64);
         env.storage()
             .instance()
+            .set(&DataKey::SuccessorEpoch, &earnproof_shared::SUCCESSOR_EPOCH_MIN);
+        env.storage()
+            .instance()
             .set(&DataKey::MaxActiveIssuers, &u32::MAX);
         env.storage()
             .instance()
@@ -928,6 +934,15 @@ impl IssuerRegistryContract {
         }
     }
 
+    /// Returns the current successor epoch. Incremented each time a successor is activated.
+    /// Prevents rollback by binding state to a specific governance epoch.
+    pub fn get_successor_epoch(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SuccessorEpoch)
+            .unwrap_or(earnproof_shared::SUCCESSOR_EPOCH_MIN)
+    }
+
     pub fn activate_successor(env: Env, proposal_id: BytesN<32>) -> Result<(), IssuerError> {
         Self::ensure_not_decommissioned(&env)?;
         let admin = Self::get_admin(env.clone()).map_err(|_| IssuerError::IssuerNotFound)?;
@@ -955,6 +970,24 @@ impl IssuerRegistryContract {
         env.storage()
             .instance()
             .remove(&DataKey::SuccessorNomination);
+        
+        // Increment successor epoch to prevent rollback to pre-activation state
+        let current_epoch = Self::get_successor_epoch(env.clone());
+        let new_epoch = current_epoch.saturating_add(1);
+        env.storage()
+            .instance()
+            .set(&DataKey::SuccessorEpoch, &new_epoch);
+        
+        // Bump issuer epoch to mark governance state transition
+        let issuer_epoch: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::IssuerEpoch)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::IssuerEpoch, &issuer_epoch.saturating_add(1));
+        
         ContractDecommissioned {
             proposal_id,
             old_instance: env.current_contract_address(),
@@ -3994,6 +4027,110 @@ mod test {
                 &bytes(&env, 0x49),
             ),
             Err(Ok(IssuerError::IssuerRevoked))
+        );
+    }
+
+    #[test]
+    fn revocation_queries_work_after_decommission() {
+        let (env, client, admin) = setup();
+        let issuer_id = bytes(&env, 0x41);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+
+        // Register and revoke an issuer
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 0x42),
+            &bytes(&env, 0x43),
+        );
+        client.revoke_issuer(&bytes(&env, 0x44), &issuer_id, &bytes(&env, 0x45));
+
+        // Verify revocation is recorded
+        let result_before = client.get_issuer_revocation_tombstone(&issuer_id);
+        assert_eq!(result_before.state, IssuerRevocationState::Revoked);
+
+        // Decommission the contract
+        client.nominate_successor(&admin);
+        env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+        client.activate_successor(&bytes(&env, 0x99));
+
+        // Revocation query should still work after decommission
+        let result_after = client.get_issuer_revocation_tombstone(&issuer_id);
+        assert_eq!(result_after.state, IssuerRevocationState::Revoked);
+        assert_eq!(result_after.issuer_id_hash, issuer_id);
+        assert_eq!(result_after.version, result_before.version);
+        assert_eq!(result_after.revoked_at, result_before.revoked_at);
+        assert_eq!(result_after.revoked_ledger, result_before.revoked_ledger);
+    }
+
+    #[test]
+    fn revocation_tombstone_ttl_extends_after_decommission() {
+        let (env, client, admin) = setup();
+        let issuer_id = bytes(&env, 0x41);
+        let issuer_address = Address::from_str(&env, ISSUER_ONE);
+
+        client.register_issuer(
+            &issuer_id,
+            &issuer_address,
+            &bytes(&env, 0x42),
+            &bytes(&env, 0x43),
+        );
+        client.revoke_issuer(&bytes(&env, 0x44), &issuer_id, &bytes(&env, 0x45));
+
+        // Decommission
+        client.nominate_successor(&admin);
+        env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+        client.activate_successor(&bytes(&env, 0x99));
+
+        // Query should extend TTL (no error should occur)
+        let result = client.get_issuer_revocation_tombstone(&issuer_id);
+        assert_eq!(result.state, IssuerRevocationState::Revoked);
+
+        // keepalive should also work
+        assert!(client.keepalive_revocation_tombstone(&issuer_id));
+    }
+
+    #[test]
+    fn batch_revocation_queries_work_after_decommission() {
+        let (env, client, admin) = setup();
+        let revoked_id = bytes(&env, 0x51);
+        let active_id = bytes(&env, 0x52);
+        let unknown_id = bytes(&env, 0x53);
+
+        client.register_issuer(
+            &active_id,
+            &Address::from_str(&env, ISSUER_ONE),
+            &bytes(&env, 0x54),
+            &bytes(&env, 0x55),
+        );
+        client.register_issuer(
+            &revoked_id,
+            &Address::from_str(&env, ISSUER_TWO),
+            &bytes(&env, 0x56),
+            &bytes(&env, 0x57),
+        );
+        client.revoke_issuer(&bytes(&env, 0x58), &revoked_id, &bytes(&env, 0x59));
+
+        // Decommission
+        client.nominate_successor(&admin);
+        env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+        client.activate_successor(&bytes(&env, 0x99));
+
+        // Batch query should still work
+        let request = vec![&env, unknown_id, revoked_id, active_id];
+        let results = client.get_issuer_revocation_statuses(&request);
+
+        assert_eq!(
+            results.get(0).unwrap().state,
+            IssuerRevocationState::Unknown
+        );
+        assert_eq!(
+            results.get(1).unwrap().state,
+            IssuerRevocationState::Revoked
+        );
+        assert_eq!(
+            results.get(2).unwrap().state,
+            IssuerRevocationState::NotRevoked
         );
     }
 

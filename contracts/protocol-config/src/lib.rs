@@ -21,6 +21,9 @@ use earnproof_shared::{
     MAX_SCHEMA_ACTIVATION_NOTICE_SECONDS, MAX_SCHEMA_LINEAGE_DEPTH, MAX_SCHEMA_PROOF_TYPES,
     MAX_SCHEMA_VALIDITY_SECONDS, MIGRATION_STATUS_VERSION, PROTOCOL_CONFIG_INTERFACE_VERSION,
     SHA256_COMMITMENT_ALGORITHM_V1, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
+    INVARIANT_CHECKPOINT_RECEIPT_VERSION, INVARIANT_STATUS_PASSED, INVARIANT_STATUS_FAILED,
+    INVARIANT_STATUS_BLOCKED, INVARIANT_CHECKPOINT_BUFFER_SIZE,
+    compute_invariant_checkpoint_receipt_hash, InvariantCheckpointReceipt,
 };
 use earnproof_shared::{
     hash_algorithm_activate, hash_algorithm_approve, hash_algorithm_deprecate,
@@ -104,6 +107,20 @@ enum DataKey {
     EmergencyActionNonce,
     /// Governed retention cap and prune watermark for one bounded history.
     HistoryRetention(HistoryKind),
+    /// Ring buffer slot (0 to INVARIANT_CHECKPOINT_BUFFER_SIZE - 1) holding
+    /// one InvariantCheckpointReceipt.
+    InvariantCheckpointRing(u32),
+    /// Monotonically-increasing total count of invariant checkpoint receipts
+    /// ever appended (for ring buffer wrapping).
+    InvariantCheckpointTotal,
+    /// Map from WASM hash to most recent InvariantCheckpointReceipt for that upgrade.
+    InvariantCheckpointByHash(BytesN<32>),
+    /// Retention policy for invariant checkpoint history.
+    InvariantCheckpointRetention,
+    /// Final invariant checkpoint recorded at migration completion.
+    MigrationFinalCheckpoint,
+    /// Governance-triggered invariant audit receipt.
+    GovernanceInvariantReceipt(BytesN<32>),
 }
 
 // ── admin transfer events ─────────────────────────────────────────────────────────
@@ -124,6 +141,32 @@ pub struct GovernanceReceiptCommitted {
     pub proposal_id: BytesN<32>,
     pub receipt_hash: BytesN<32>,
     pub resulting_config_version: u32,
+}
+
+/// Emitted when an invariant checkpoint receipt is successfully recorded
+/// during contract upgrade or migration.
+#[contractevent]
+pub struct InvariantCheckpointRecorded {
+    pub wasm_hash: BytesN<32>,
+    pub receipt_hash: BytesN<32>,
+    pub invariant_result_status: u32,
+    pub execution_ledger: u32,
+}
+
+/// Emitted when the final invariant checkpoint is recorded at migration completion.
+#[contractevent]
+pub struct MigrationFinalCheckpointRecorded {
+    pub receipt_hash: BytesN<32>,
+    pub target_layout_version: u32,
+    pub execution_ledger: u32,
+}
+
+/// Emitted when a governance-approved invariant audit is executed.
+#[contractevent]
+pub struct InvariantAuditExecuted {
+    pub proposal_id: BytesN<32>,
+    pub receipt_hash: BytesN<32>,
+    pub invariant_result_status: u32,
 }
 
 #[contractevent]

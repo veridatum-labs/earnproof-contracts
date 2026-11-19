@@ -786,6 +786,98 @@ pub fn compute_governance_receipt_hash(
     env.crypto().sha256(&payload).to_bytes()
 }
 
+/// Versioned record of invariant verification results at a specific contract state.
+/// Recorded during upgrade execution to bind invariant success/failure to code hash,
+/// storage layout version, and config version.
+///
+/// Fields:
+/// - `receipt_version`: Encoding version (not storage layout version)
+/// - `wasm_hash`: Target code hash for this upgrade
+/// - `source_layout_version`: Storage layout version before upgrade
+/// - `target_layout_version`: Storage layout version after upgrade (if migration)
+/// - `source_config_version`: Config version before upgrade
+/// - `target_config_version`: Config version after upgrade
+/// - `execution_ledger`: Ledger sequence where upgrade was executed
+/// - `execution_timestamp`: Unix timestamp of upgrade execution
+/// - `invariant_result_status`: 0 = Passed, 1 = Failed, 2 = Blocked
+/// - `failure_reason`: Reason if status != 0 (e.g., "InvalidIssuerState")
+/// - `receipt_hash`: Deterministic binding of all fields to ledger state
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InvariantCheckpointReceipt {
+    pub receipt_version: u32,
+    pub wasm_hash: BytesN<32>,
+    pub source_layout_version: u32,
+    pub target_layout_version: u32,
+    pub source_config_version: u32,
+    pub target_config_version: u32,
+    pub execution_ledger: u32,
+    pub execution_timestamp: u64,
+    pub invariant_result_status: u32,
+    pub failure_reason: Symbol,
+    pub receipt_hash: BytesN<32>,
+}
+
+/// Receipt version for InvariantCheckpointReceipt encoding.
+pub const INVARIANT_CHECKPOINT_RECEIPT_VERSION: u32 = 1;
+
+/// Invariant check result status: all invariants passed
+pub const INVARIANT_STATUS_PASSED: u32 = 0;
+
+/// Invariant check result status: one or more invariants failed
+pub const INVARIANT_STATUS_FAILED: u32 = 1;
+
+/// Invariant check result status: check blocked by external condition (pause, precondition)
+pub const INVARIANT_STATUS_BLOCKED: u32 = 2;
+
+/// Ring buffer capacity for invariant checkpoint history
+pub const INVARIANT_CHECKPOINT_BUFFER_SIZE: u32 = 50;
+
+/// Computes the deterministic receipt hash for an InvariantCheckpointReceipt.
+///
+/// The hash includes all mutable fields to bind the receipt to a specific ledger state.
+/// Includes network ID and contract address for domain separation.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_invariant_checkpoint_receipt_hash(
+    env: &Env,
+    wasm_hash: &BytesN<32>,
+    source_layout_version: u32,
+    target_layout_version: u32,
+    source_config_version: u32,
+    target_config_version: u32,
+    execution_ledger: u32,
+    execution_timestamp: u64,
+    invariant_result_status: u32,
+    failure_reason: &Symbol,
+) -> BytesN<32> {
+    let mut payload = soroban_sdk::Bytes::new(env);
+    
+    // Domain separation: network ID and contract address
+    payload.append(&env.ledger().network_id().into());
+    payload.append(&env.current_contract_address().to_xdr(env));
+    
+    // Version header
+    payload.extend_from_array(&INVARIANT_CHECKPOINT_RECEIPT_VERSION.to_be_bytes());
+    
+    // Core fields
+    payload.extend_from_array(wasm_hash.as_ref());
+    payload.extend_from_array(&source_layout_version.to_be_bytes());
+    payload.extend_from_array(&target_layout_version.to_be_bytes());
+    payload.extend_from_array(&source_config_version.to_be_bytes());
+    payload.extend_from_array(&target_config_version.to_be_bytes());
+    
+    // Execution context
+    payload.extend_from_array(&execution_ledger.to_be_bytes());
+    payload.extend_from_array(&execution_timestamp.to_be_bytes());
+    
+    // Result binding
+    payload.extend_from_array(&invariant_result_status.to_be_bytes());
+    payload.extend_from_array(failure_reason.to_xdr(env).as_ref());
+    
+    // Finalize: SHA-256 hash
+    env.crypto().sha256(&payload).into()
+}
+
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AdminTransferState {

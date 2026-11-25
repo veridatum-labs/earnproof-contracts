@@ -21,6 +21,9 @@ use earnproof_shared::{
     MAX_SCHEMA_ACTIVATION_NOTICE_SECONDS, MAX_SCHEMA_LINEAGE_DEPTH, MAX_SCHEMA_PROOF_TYPES,
     MAX_SCHEMA_VALIDITY_SECONDS, MIGRATION_STATUS_VERSION, PROTOCOL_CONFIG_INTERFACE_VERSION,
     SHA256_COMMITMENT_ALGORITHM_V1, TTL_EXTEND_TO_LEDGERS, TTL_THRESHOLD_LEDGERS,
+    MultiActionBatch, MultiActionProposal, MultiActionExecutionStatus, MultiActionExecutionRecord,
+    is_valid_multi_action_batch, multi_action_batch_commitment,
+    MULTI_ACTION_BATCH_ENCODING_VERSION, MAX_BATCH_ACTIONS,
     INVARIANT_CHECKPOINT_RECEIPT_VERSION, INVARIANT_STATUS_PASSED, INVARIANT_STATUS_FAILED,
     INVARIANT_STATUS_BLOCKED, INVARIANT_CHECKPOINT_BUFFER_SIZE,
     compute_invariant_checkpoint_receipt_hash, InvariantCheckpointReceipt,
@@ -106,6 +109,12 @@ enum DataKey {
     EmergencyActionNonce,
     /// Governed retention cap and prune watermark for one bounded history.
     HistoryRetention(HistoryKind),
+    // ── multi-action governance proposals (issue #348) ──────────────────
+    MultiActionProposal(BytesN<32>),
+    MultiActionSnapshot(BytesN<32>),
+    MultiActionApproverSnapshot(BytesN<32>),
+    MultiActionDomain(BytesN<32>),
+    MultiActionNonce,
     /// Ring buffer slot (0 to INVARIANT_CHECKPOINT_BUFFER_SIZE - 1) holding
     /// one InvariantCheckpointReceipt.
     InvariantCheckpointRing(u32),
@@ -422,6 +431,49 @@ pub struct EmergencyActionExecuted {
     pub reason_commitment: BytesN<32>,
 }
 
+// ── multi-action governance events (issue #348) ──────────────────────────────
+
+#[contractevent]
+pub struct MultiActionProposed {
+    pub proposal_id: BytesN<32>,
+    pub batch_commitment: BytesN<32>,
+    pub action_count: u32,
+    pub proposer: Address,
+}
+
+#[contractevent]
+pub struct MultiActionApproved {
+    pub proposal_id: BytesN<32>,
+    pub signer: Address,
+}
+
+#[contractevent]
+pub struct MultiActionExecutionStarted {
+    pub proposal_id: BytesN<32>,
+    pub action_count: u32,
+}
+
+#[contractevent]
+pub struct MultiActionExecuted {
+    pub proposal_id: BytesN<32>,
+    pub config_version: u32,
+    pub receipt_hash: BytesN<32>,
+}
+
+#[contractevent]
+pub struct MultiActionRolledBack {
+    pub proposal_id: BytesN<32>,
+    pub failed_action_index: u32,
+    pub error: ContractError,
+}
+
+#[contractevent]
+pub struct MultiActionCancelled {
+    pub proposal_id: BytesN<32>,
+    pub cancelled_by: Address,
+}
+
+// ── upgrade events ───────────────────────────────────────────────────────────
 // ?? upgrade events ???????????????????????????????????????????????????????????
 
 /// Emitted when the admin adds a WASM hash to the upgrade allowlist.
@@ -6349,5 +6401,538 @@ mod test {
         fn commit_for_test(env: &Env, version: u32) -> BytesN<32> {
             Self::commit(env, version)
         }
+    }
+
+    // ── multi-action governance proposals (issue #348) ──────────────────────
+
+    pub fn propose_multi_action(
+        env: Env,
+        batch: MultiActionBatch,
+    ) -> Result<BytesN<32>, ContractError> {
+        Self::ensure_not_decommissioned(&env)?;
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+        
+        if !is_valid_multi_action_batch(&batch) {
+            return Err(ContractError::InvalidMultiActionBatch);
+        }
+        
+        let policy = Self::critical_action_policy(&env);
+        if !policy.enabled {
+            return Err(ContractError::InvalidState);
+        }
+
+        let nonce = env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::MultiActionNonce)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(ContractError::InvalidState)?;
+        
+        let proposal_id = multi_action_batch_commitment(
+            &env,
+            &env.current_contract_address(),
+            &batch,
+            nonce,
+        );
+        
+        let created_at = env.ledger().sequence();
+        let expires_at = created_at
+            .checked_add(CRITICAL_ACTION_APPROVAL_EXPIRY_LEDGERS)
+            .ok_or(ContractError::InvalidInput)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiActionNonce, &nonce);
+
+        let batch_commitment = multi_action_batch_commitment(
+            &env,
+            &env.current_contract_address(),
+            &batch,
+            nonce,
+        );
+
+        let proposal = MultiActionProposal {
+            batch: batch.clone(),
+            policy: policy.clone(),
+            proposer: admin.clone(),
+            approvals: Vec::new(&env),
+            created_at,
+            expires_at,
+        };
+
+        let key = DataKey::MultiActionProposal(proposal_id.clone());
+        env.storage().persistent().set(&key, &proposal);
+
+        let approval_snapshot_key = DataKey::MultiActionSnapshot(proposal_id.clone());
+        let approval_snapshot = GovernanceApprovalSnapshot {
+            snapshot_version: GOVERNANCE_APPROVAL_SNAPSHOT_VERSION,
+            policy_version: Self::get_critical_policy_version(env.clone()),
+            threshold: policy.threshold,
+            signer_set_digest: earnproof_shared::governance_signer_set_digest(
+                &env,
+                &policy.signers,
+            ),
+        };
+        env.storage()
+            .persistent()
+            .set(&approval_snapshot_key, &approval_snapshot);
+
+        let approver_snapshot_key = DataKey::MultiActionApproverSnapshot(proposal_id.clone());
+        let approver_snapshot = Self::approver_snapshot(&env, &policy);
+        env.storage()
+            .persistent()
+            .set(&approver_snapshot_key, &approver_snapshot);
+
+        env.storage().persistent().extend_ttl(
+            &key,
+            TTL_THRESHOLD_LEDGERS,
+            CRITICAL_ACTION_APPROVAL_EXPIRY_LEDGERS + TTL_THRESHOLD_LEDGERS,
+        );
+        env.storage().persistent().extend_ttl(
+            &approval_snapshot_key,
+            TTL_THRESHOLD_LEDGERS,
+            CRITICAL_ACTION_APPROVAL_EXPIRY_LEDGERS + TTL_THRESHOLD_LEDGERS,
+        );
+        env.storage().persistent().extend_ttl(
+            &approver_snapshot_key,
+            TTL_THRESHOLD_LEDGERS,
+            CRITICAL_ACTION_APPROVAL_EXPIRY_LEDGERS + TTL_THRESHOLD_LEDGERS,
+        );
+
+        Self::extend_instance_ttl(env.clone());
+
+        MultiActionProposed {
+            proposal_id: proposal_id.clone(),
+            batch_commitment,
+            action_count: batch.actions.len() as u32,
+            proposer: admin,
+        }
+        .publish(&env);
+
+        Ok(proposal_id)
+    }
+
+    pub fn get_multi_action_proposal(
+        env: Env,
+        proposal_id: BytesN<32>,
+    ) -> Option<MultiActionProposal> {
+        let key = DataKey::MultiActionProposal(proposal_id);
+        let proposal = env.storage().persistent().get(&key);
+        if proposal.is_some() {
+            env.storage().persistent().extend_ttl(
+                &key,
+                TTL_THRESHOLD_LEDGERS,
+                CRITICAL_ACTION_APPROVAL_EXPIRY_LEDGERS + TTL_THRESHOLD_LEDGERS,
+            );
+        }
+        proposal
+    }
+
+    pub fn approve_multi_action(
+        env: Env,
+        proposal_id: BytesN<32>,
+        signer: Address,
+    ) -> Result<(), ContractError> {
+        Self::ensure_not_decommissioned(&env)?;
+        Self::require_auth(&signer);
+
+        let proposal = Self::get_multi_action_proposal(env.clone(), proposal_id.clone())
+            .ok_or(ContractError::MultiActionProposalNotFound)?;
+
+        if env.ledger().sequence() >= proposal.expires_at {
+            return Err(ContractError::MultiActionProposalExpired);
+        }
+
+        if proposal.approvals.contains(&signer) {
+            return Err(ContractError::AlreadyExists);
+        }
+
+        let approver_snapshot_key = DataKey::MultiActionApproverSnapshot(proposal_id.clone());
+        let snapshot: GovernanceApproverSnapshot = env
+            .storage()
+            .persistent()
+            .get(&approver_snapshot_key)
+            .ok_or(ContractError::NotFound)?;
+
+        let is_signer = snapshot
+            .approvers
+            .iter()
+            .any(|approver| approver.address == signer);
+
+        if !is_signer {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let mut updated_approvals = proposal.approvals.clone();
+        updated_approvals.push_back(signer.clone());
+
+        let updated_proposal = MultiActionProposal {
+            approvals: updated_approvals,
+            ..proposal
+        };
+
+        let key = DataKey::MultiActionProposal(proposal_id.clone());
+        env.storage().persistent().set(&key, &updated_proposal);
+        env.storage().persistent().extend_ttl(
+            &key,
+            TTL_THRESHOLD_LEDGERS,
+            CRITICAL_ACTION_APPROVAL_EXPIRY_LEDGERS + TTL_THRESHOLD_LEDGERS,
+        );
+
+        Self::extend_instance_ttl(env.clone());
+
+        MultiActionApproved {
+            proposal_id,
+            signer,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn execute_multi_action(
+        env: Env,
+        proposal_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        Self::ensure_not_decommissioned(&env)?;
+        
+        let proposal = Self::get_multi_action_proposal(env.clone(), proposal_id.clone())
+            .ok_or(ContractError::MultiActionProposalNotFound)?;
+
+        if env.ledger().sequence() >= proposal.expires_at {
+            return Err(ContractError::MultiActionProposalExpired);
+        }
+
+        let approval_snapshot_key = DataKey::MultiActionSnapshot(proposal_id.clone());
+        let approval_snapshot: GovernanceApprovalSnapshot = env
+            .storage()
+            .persistent()
+            .get(&approval_snapshot_key)
+            .ok_or(ContractError::NotFound)?;
+
+        if proposal.approvals.len() as u32 < approval_snapshot.threshold {
+            return Err(ContractError::MultiActionInsufficientApprovals);
+        }
+
+        MultiActionExecutionStarted {
+            proposal_id: proposal_id.clone(),
+            action_count: proposal.batch.actions.len() as u32,
+        }
+        .publish(&env);
+
+        for (index, action) in proposal.batch.actions.iter().enumerate() {
+            Self::execute_single_action(env.clone(), action.clone())
+                .map_err(|err| {
+                    MultiActionRolledBack {
+                        proposal_id: proposal_id.clone(),
+                        failed_action_index: index as u32,
+                        error: err,
+                    }
+                    .publish(&env);
+                    err
+                })?;
+        }
+
+        Self::bump_config_version(env.clone());
+        let config_version = Self::get_config_version(env.clone());
+        let batch_commitment = multi_action_batch_commitment(
+            &env,
+            &env.current_contract_address(),
+            &proposal.batch,
+            env.storage()
+                .instance()
+                .get::<_, u32>(&DataKey::MultiActionNonce)
+                .unwrap_or(0),
+        );
+
+        let receipt_hash = env.crypto().sha256(&(
+            Symbol::new(&env, "multi_action_receipt"),
+            proposal_id.clone(),
+            config_version,
+            env.ledger().sequence(),
+        )
+        .to_xdr(&env))
+        .to_bytes();
+
+        Self::append_config_history(
+            env.clone(),
+            ConfigChangeCategory::CriticalApproval,
+            batch_commitment,
+        );
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MultiActionProposal(proposal_id.clone()));
+        env.storage()
+            .persistent()
+            .remove(&approval_snapshot_key);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MultiActionApproverSnapshot(proposal_id.clone()));
+
+        Self::extend_instance_ttl(env.clone());
+
+        MultiActionExecuted {
+            proposal_id,
+            config_version,
+            receipt_hash,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    fn execute_single_action(
+        env: Env,
+        action: CriticalAction,
+    ) -> Result<(), ContractError> {
+        match action {
+            CriticalAction::SchemaApproval(version) => {
+                Self::execute_schema_approval(env, version)
+            }
+            CriticalAction::SchemaActivation(version, activates_at) => {
+                Self::execute_schema_activation(env, version, activates_at)
+            }
+            CriticalAction::SchemaDeprecation(version) => {
+                Self::execute_schema_deprecation(env, version)
+            }
+            CriticalAction::SchemaReplacement(deprecated, replacement, compatibility) => {
+                Self::execute_schema_replacement(env, deprecated, replacement, compatibility)
+            }
+            CriticalAction::SchemaPayloadLimit(version, limit) => {
+                Self::execute_schema_payload_limit(env, version, limit)
+            }
+            CriticalAction::ApprovalPolicyUpdate(new_policy) => {
+                Self::execute_approval_policy_update(env, new_policy)
+            }
+            CriticalAction::EmergencyPolicyUpdate(new_policy) => {
+                Self::execute_emergency_policy_update(env, new_policy)
+            }
+            CriticalAction::IssuerRegistryReplacement(_) 
+            | CriticalAction::ProtocolConfigReplacement(_) => {
+                Err(ContractError::InvalidInput)
+            }
+        }
+    }
+
+    fn execute_schema_approval(env: Env, version: u32) -> Result<(), ContractError> {
+        if Self::is_scope_paused(env.clone(), PauseScope::Updates) {
+            return Err(ContractError::ProtocolPaused);
+        }
+        
+        let schema_version = Self::get_schema_version(env.clone(), version);
+        if schema_version.is_some() {
+            return Err(ContractError::AlreadyExists);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaVersion(version), &true);
+
+        SchemaApproved { version }.publish(&env);
+        Ok(())
+    }
+
+    fn execute_schema_activation(env: Env, version: u32, activates_at: u64) -> Result<(), ContractError> {
+        if Self::is_scope_paused(env.clone(), PauseScope::Updates) {
+            return Err(ContractError::ProtocolPaused);
+        }
+
+        if !Self::get_schema_version(env.clone(), version).unwrap_or(false) {
+            return Err(ContractError::InvalidInput);
+        }
+
+        let min_notice = Self::get_min_schema_activation_notice(env.clone());
+        let proposed_at = env.ledger().sequence() as u64;
+        if activates_at < proposed_at + min_notice {
+            return Err(ContractError::InvalidTimingConfig);
+        }
+
+        let notice = SchemaActivationNotice {
+            notice_version: 1,
+            schema_version: version,
+            proposed_at,
+            activates_at,
+            evidence_bundle: None,
+            minimum_notice_seconds: min_notice,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaActivation(version), &notice);
+
+        SchemaActivationScheduled {
+            version,
+            proposed_at,
+            activates_at,
+            minimum_notice_seconds: min_notice,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    fn execute_schema_deprecation(env: Env, version: u32) -> Result<(), ContractError> {
+        if Self::is_scope_paused(env.clone(), PauseScope::Updates) {
+            return Err(ContractError::ProtocolPaused);
+        }
+
+        if !Self::get_schema_version(env.clone(), version).unwrap_or(false) {
+            return Err(ContractError::InvalidInput);
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::SchemaVersion(version));
+
+        SchemaDeprecated { version }.publish(&env);
+        Ok(())
+    }
+
+    fn execute_schema_replacement(
+        env: Env,
+        deprecated: u32,
+        replacement: u32,
+        compatibility: SchemaCompatibility,
+    ) -> Result<(), ContractError> {
+        if Self::is_scope_paused(env.clone(), PauseScope::Updates) {
+            return Err(ContractError::ProtocolPaused);
+        }
+
+        if !Self::get_schema_version(env.clone(), deprecated).unwrap_or(false) {
+            return Err(ContractError::InvalidInput);
+        }
+
+        if !Self::get_schema_version(env.clone(), replacement).unwrap_or(false) {
+            return Err(ContractError::InvalidInput);
+        }
+
+        let pointer = SchemaReplacementPointer {
+            pointer_version: 1,
+            deprecated_version: deprecated,
+            replacement_version: replacement,
+            compatibility,
+            effective_ledger: env.ledger().sequence(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaReplacement(deprecated), &pointer);
+
+        SchemaReplacementSet {
+            deprecated_version: deprecated,
+            replacement_version: replacement,
+            compatibility,
+            effective_ledger: env.ledger().sequence(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    fn execute_schema_payload_limit(env: Env, version: u32, limit: u32) -> Result<(), ContractError> {
+        if Self::is_scope_paused(env.clone(), PauseScope::Updates) {
+            return Err(ContractError::ProtocolPaused);
+        }
+
+        if !Self::get_schema_version(env.clone(), version).unwrap_or(false) {
+            return Err(ContractError::InvalidInput);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaPayloadLimit(version), &limit);
+
+        SchemaPayloadLimitSet {
+            version,
+            max_size: limit,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    fn execute_approval_policy_update(
+        env: Env,
+        new_policy: CriticalActionPolicy,
+    ) -> Result<(), ContractError> {
+        env.storage()
+            .instance()
+            .set(&DataKey::CriticalActionPolicy, &new_policy);
+        
+        let version = env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::CriticalActionPolicyVersion)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(ContractError::InvalidState)?;
+        
+        env.storage()
+            .instance()
+            .set(&DataKey::CriticalActionPolicyVersion, &version);
+
+        CriticalActionPolicySet {
+            enabled: new_policy.enabled,
+            threshold: new_policy.threshold,
+            signer_count: new_policy.signers.len() as u32,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    fn execute_emergency_policy_update(
+        env: Env,
+        new_policy: EmergencyFastTrackPolicy,
+    ) -> Result<(), ContractError> {
+        env.storage()
+            .instance()
+            .set(&DataKey::EmergencyFastTrackPolicy, &new_policy);
+
+        EmergencyFastTrackPolicySet {
+            enabled: new_policy.enabled,
+            threshold: new_policy.threshold,
+            guardian_count: new_policy.guardians.len() as u32,
+            max_lifetime_ledgers: new_policy.max_lifetime_ledgers,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn cancel_multi_action(
+        env: Env,
+        proposal_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        Self::ensure_not_decommissioned(&env)?;
+        
+        let _proposal = Self::get_multi_action_proposal(env.clone(), proposal_id.clone())
+            .ok_or(ContractError::MultiActionProposalNotFound)?;
+
+        let admin = Self::get_admin(env.clone())?;
+        Self::require_auth(&admin);
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MultiActionProposal(proposal_id.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MultiActionSnapshot(proposal_id.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MultiActionApproverSnapshot(proposal_id.clone()));
+
+        Self::extend_instance_ttl(env.clone());
+
+        MultiActionCancelled {
+            proposal_id,
+            cancelled_by: admin,
+        }
+        .publish(&env);
+
+        Ok(())
     }
 }

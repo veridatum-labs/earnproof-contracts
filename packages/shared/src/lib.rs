@@ -1077,6 +1077,13 @@ pub enum ContractError {
     ApprovalProposalExpired = 97,
     InsufficientApprovals = 98,
     InvalidApprovalPolicy = 99,
+
+    // Multi-action governance errors (100-104)
+    InvalidMultiActionBatch = 100,
+    MultiActionProposalNotFound = 101,
+    MultiActionProposalExpired = 102,
+    MultiActionPartialFailure = 103,
+    MultiActionInsufficientApprovals = 104,
 }
 
 /// Issuer-specific errors (200-299).
@@ -1710,6 +1717,107 @@ pub struct EmergencyActionProposal {
 }
 
 pub const EMERGENCY_FAST_TRACK_ENCODING_VERSION: u32 = 1;
+
+// ── atomic multi-action governance proposals (issue #348) ──────────────────
+
+/// Encoding version for multi-action batch commitments.
+pub const MULTI_ACTION_BATCH_ENCODING_VERSION: u32 = 1;
+
+/// Maximum number of actions allowed in a single multi-action batch.
+pub const MAX_BATCH_ACTIONS: u32 = 8;
+
+/// Bounded ordered list of critical actions to be executed atomically.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiActionBatch {
+    pub batch_version: u32,
+    pub actions: Vec<CriticalAction>,
+}
+
+/// Execution status of a multi-action proposal.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MultiActionExecutionStatus {
+    Pending,
+    Approved,
+    Executing,
+    Succeeded,
+    PartialFailure(u32),
+    Cancelled,
+}
+
+/// Persisted execution record for a multi-action proposal.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiActionExecutionRecord {
+    pub record_version: u32,
+    pub proposal_id: BytesN<32>,
+    pub batch_commitment: BytesN<32>,
+    pub status: MultiActionExecutionStatus,
+    pub approval_count: u32,
+    pub config_version: u32,
+    pub ledger: u32,
+    pub timestamp: u64,
+    pub receipt_hash: BytesN<32>,
+}
+
+/// Persisted multi-action proposal with full policy snapshot.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiActionProposal {
+    pub batch: MultiActionBatch,
+    pub policy: CriticalActionPolicy,
+    pub proposer: Address,
+    pub approvals: Vec<Address>,
+    pub created_at: u32,
+    pub expires_at: u32,
+}
+
+/// Validates that a batch is within acceptable bounds.
+pub fn is_valid_multi_action_batch(batch: &MultiActionBatch) -> bool {
+    let len = batch.actions.len() as u32;
+    
+    if len == 0 || len > MAX_BATCH_ACTIONS {
+        return false;
+    }
+    
+    let mut seen_categories: Vec<CriticalActionCategory> = Vec::new();
+    for i in 0..len {
+        if let Some(action) = batch.actions.get(i as usize) {
+            let category = action.category();
+            if matches!(category, CriticalActionCategory::ProtocolConfigReplacement | 
+                                  CriticalActionCategory::IssuerRegistryReplacement) {
+                return false;
+            }
+            for seen_cat in &seen_categories {
+                if *seen_cat == category {
+                    return false;
+                }
+            }
+            let _ = seen_categories.push_back(category);
+        }
+    }
+    
+    true
+}
+
+/// Computes the canonical multi-action batch commitment (proposal ID).
+pub fn multi_action_batch_commitment(
+    env: &Env,
+    contract_id: &Address,
+    batch: &MultiActionBatch,
+    nonce: u32,
+) -> BytesN<32> {
+    let preimage = (
+        Symbol::new(env, "gov_batch"),
+        MULTI_ACTION_BATCH_ENCODING_VERSION,
+        env.ledger().network_id(),
+        contract_id.clone(),
+        batch.clone(),
+        nonce,
+    );
+    env.crypto().sha256(&preimage.to_xdr(env)).to_bytes()
+}
 
 /// One bounded, on-chain summary of a governance change, as stored in the
 /// change-history ring.
